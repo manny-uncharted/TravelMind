@@ -1,6 +1,6 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
-
+import { fetchTopPlaces } from '../tools/tavily-wrapper'; // 👈 adjust one “..” if your folder depth differs
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export interface Activity {
@@ -249,7 +249,7 @@ export class TravelConcierge {
       return itinerary;
     } catch (error) {
       console.error('❌ Travel Concierge Agent error:', error);
-      return this.getMockItinerary(city, startDate, endDate, travelers, budget, insights);
+      return await this.getMockItinerary(city, startDate, endDate, travelers, budget, insights);
     }
   }
 
@@ -296,60 +296,86 @@ export class TravelConcierge {
     ];
   }
 
-  private generateBookingInfo(city: string, startDate: string, endDate: string, schedule: any[]): any {
-    return {
-      hotels: [
-        {
-          name: `Premium Hotel ${city}`,
-          location: "City Center",
-          checkIn: startDate,
-          checkOut: endDate,
-          pricePerNight: "$200-400",
-          bookingDeadline: "2 weeks before travel",
-          amenities: ["WiFi", "Breakfast", "Concierge", "Spa"]
-        }
-      ],
-      flights: [
-        {
-          type: "International",
-          departure: "Home Airport",
-          arrival: `${city} Airport`,
-          date: startDate,
-          bookingDeadline: "1 month before travel",
-          notes: "Book early for better prices"
-        }
-      ],
-      activities: schedule?.flatMap(day => 
-        day.activities?.filter((activity: any) => activity.bookingRequired)
-          .map((activity: any) => ({
-            name: activity.activity,
-            place: activity.specificPlace,
-            date: day.date,
-            time: activity.time,
-            cost: activity.cost,
-            bookingRequired: true
-          })) || []
-      ) || [],
-      restaurants: [
-        {
-          name: "Local Fine Dining",
-          cuisine: "Local Specialty",
-          priceRange: "$$$",
-          reservationRequired: true,
-          bookingDeadline: "1 week before"
-        }
-      ]
-    };
-  }
+  // private generateBookingInfo(city: string, startDate: string, endDate: string, schedule: any[]): any {
+  //   return {
+  //     hotels: [
+  //       {
+  //         name: `Premium Hotel ${city}`,
+  //         location: "City Center",
+  //         checkIn: startDate,
+  //         checkOut: endDate,
+  //         pricePerNight: "$200-400",
+  //         bookingDeadline: "2 weeks before travel",
+  //         amenities: ["WiFi", "Breakfast", "Concierge", "Spa"]
+  //       }
+  //     ],
+  //     flights: [
+  //       {
+  //         type: "International",
+  //         departure: "Home Airport",
+  //         arrival: `${city} Airport`,
+  //         date: startDate,
+  //         bookingDeadline: "1 month before travel",
+  //         notes: "Book early for better prices"
+  //       }
+  //     ],
+  //     activities: schedule?.flatMap(day => 
+  //       day.activities?.filter((activity: any) => activity.bookingRequired)
+  //         .map((activity: any) => ({
+  //           name: activity.activity,
+  //           place: activity.specificPlace,
+  //           date: day.date,
+  //           time: activity.time,
+  //           cost: activity.cost,
+  //           bookingRequired: true
+  //         })) || []
+  //     ) || [],
+  //     restaurants: [
+  //       {
+  //         name: "Local Fine Dining",
+  //         cuisine: "Local Specialty",
+  //         priceRange: "$$$",
+  //         reservationRequired: true,
+  //         bookingDeadline: "1 week before"
+  //       }
+  //     ]
+  //   };
+  // }
 
-  private getMockItinerary(
+  private async generateBookingInfo(
+  city: string,
+  startDate: string,
+  endDate: string,
+  schedule: any[]
+): Promise<any> {
+  // live look‑ups via Tavily
+  return {
+    hotels:      await fetchTopPlaces(city, 'hotel'),
+    restaurants: await fetchTopPlaces(city, 'restaurant'),
+    activities:  await fetchTopPlaces(city, 'activity'),
+
+    // keep the existing flight stub so downstream code still works
+    flights: [
+      {
+        type: 'International',
+        departure: 'Home Airport',
+        arrival: `${city} Airport`,
+        date: startDate,
+        bookingDeadline: '1 month before travel',
+        notes: 'Book early for better prices'
+      }
+    ]
+  };
+}
+
+  private async getMockItinerary(
     city: string,
     startDate: string,
     endDate: string,
     travelers: string,
     budget: string,
     insights: any[]
-  ): TravelLogistics {
+  ): Promise<TravelLogistics> {
     const days = this.calculateDays(startDate, endDate);
     const budgetMultiplier = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1.0;
     const dailyBudget = Math.round(250 * budgetMultiplier);
@@ -370,7 +396,7 @@ export class TravelConcierge {
           misc: `$${Math.round(dailyBudget * 0.05 * days)} (5%)`
         }
       },
-      bookingInfo: this.generateBookingInfo(city, startDate, endDate, schedule),
+      bookingInfo: await this.generateBookingInfo(city, startDate, endDate, schedule),
       calculations: this.generateCalculations(days, budget, travelers),
       logistics: {
         transportation: [
