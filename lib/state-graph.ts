@@ -2,7 +2,14 @@ import { CitySelector } from './agents/city-selector';
 import { LocalExpert } from './agents/local-expert';
 import { TravelConcierge } from './agents/travel-concierge';
 import { TavilySearchTool } from './tools/tavily-search';
+import { BookingCurator } from './agents/booking-curator';
 import { CalculateTool } from './tools/calculate';
+
+// Define BookingPlace type if not imported from elsewhere
+type BookingPlace = {
+  type: string;
+  [key: string]: any;
+};
 
 export interface AgentMessage {
   role: 'user' | 'assistant' | 'tool';
@@ -54,6 +61,7 @@ export class StateGraph {
     this.agents.set('city-selector', new CitySelector());
     this.agents.set('local-expert', new LocalExpert());
     this.agents.set('travel-concierge', new TravelConcierge());
+    this.agents.set('booking-curator', new BookingCurator()); 
   }
 
   private initializeTools() {
@@ -79,10 +87,13 @@ export class StateGraph {
       return 'local-expert'; // Stay if not complete
     });
 
-    this.routingRules.set('travel-concierge', (state: AgentState) => {
-      // Travel concierge is the final agent
-      return 'END';
-    });
+    // this.routingRules.set('travel-concierge', (state: AgentState) => {
+
+    //   // Travel concierge is the final agent
+      
+    // });
+    this.routingRules.set('travel-concierge', (state) => 'booking-curator');
+    this.routingRules.set('booking-curator',  () => 'END');
   }
 
   async execute(input: any, startAgent: string = 'city-selector'): Promise<AgentState> {
@@ -247,6 +258,28 @@ export class StateGraph {
             }
           ]
         };
+
+      case 'booking-curator': {
+        const { selectedCity } = state.data['city-selector'];
+        const { budget }       = state.preferences;
+        const interests        = state.preferences?.interests ?? '';
+        const places = await agent.curate(selectedCity, budget, interests);
+
+        // merge curated places into existing itinerary
+        const trip = state.data['travel-concierge'];
+        trip.bookingInfo.hotels      = places.curated.filter((p: BookingPlace) => p.type === 'hotel');
+        trip.bookingInfo.restaurants = places.curated.filter((p: BookingPlace) => p.type === 'restaurant');
+        trip.bookingInfo.activities  = [
+          ...(trip.bookingInfo.activities as BookingPlace[]),
+          ...places.curated.filter((p: BookingPlace) => p.type === 'activity')
+        ];
+
+        return {
+          content: 'FINAL ANSWER – curated bookings added',
+          data:   trip,
+          isComplete: true
+        };
+      }
 
       default:
         throw new Error(`Unknown agent: ${agentName}`);
