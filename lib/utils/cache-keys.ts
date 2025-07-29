@@ -8,15 +8,8 @@ export const CACHE_KEYS = {
   TRAVEL_PLAN: (id: string) => `travel_plan:${id}`,
   TRAVEL_PLAN_BY_LOCATION: (destination: string, origin?: string, startDate?: string, endDate?: string) => {
     // Create a unique key based on travel parameters
-    const cleanDestination = destination.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '') // Remove special characters
-      .replace(/\s+/g, '_') // Replace spaces with underscores
-      .trim();
-    
-    const cleanOrigin = origin ? origin.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, '_')
-      .trim() : 'anywhere';
+    const cleanDestination = cleanString(destination);
+    const cleanOrigin = origin ? cleanString(origin) : 'anywhere';
     
     const dateRange = startDate && endDate ? `${startDate}_to_${endDate}` : 'flexible_dates';
     
