@@ -20,38 +20,95 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── 1. Fetch (or seed) cached plan ────────────────────────────────────────────
+        // ── 1. Fetch (or seed) cached plan ────────────────────────────────────────────
     const planKey = CACHE_KEYS.TRAVEL_PLAN(planId);
     let plan = await CacheManager.get<any>(planKey);
 
     if (!plan && currentPlan) {
-      await CacheManager.set(planKey, currentPlan, 86_400); // 24 h
-      plan = currentPlan;
+      // Ensure the plan structure is correct for caching
+      const normalizedPlan = {
+        itinerary: currentPlan.itinerary || null,
+        recommendations: currentPlan.recommendations || [],
+        workflow_data: currentPlan.workflow_data || {},
+        orchestration: currentPlan.orchestration || {}
+      };
+      
+      await CacheManager.set(planKey, normalizedPlan, 86_400); // 24 h
+      plan = normalizedPlan;
       console.log(`[chat-with-plan] seeded cache for ${planId}`);
+    }
+
+    // If currentPlan is provided and differs from cached plan, update the cache
+    if (currentPlan && plan) {
+      const hasItinerary = !!currentPlan.itinerary;
+      const cachedHasItinerary = !!plan.itinerary;
+      
+      // If currentPlan has itinerary but cached doesn't, update cache
+      if (hasItinerary && !cachedHasItinerary) {
+        console.log(`[chat-with-plan] Updating cache with fresh itinerary data for ${planId}`);
+        const normalizedPlan = {
+          itinerary: currentPlan.itinerary || null,
+          recommendations: currentPlan.recommendations || [],
+          workflow_data: currentPlan.workflow_data || {},
+          orchestration: currentPlan.orchestration || {}
+        };
+        
+        await CacheManager.set(planKey, normalizedPlan, 86_400);
+        plan = normalizedPlan;
+      }
     }
 
     if (!plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
     }
 
-    // ── 2. Build Gemini prompt asking for RFC‑6902 patch ──────────────────────────
+    // Debug: Log the structure of the cached plan
+    console.log('[chat-with-plan] Plan structure:', {
+      hasItinerary: !!plan.itinerary,
+      planKeys: Object.keys(plan),
+      itineraryKeys: plan.itinerary ? Object.keys(plan.itinerary) : null,
+      scheduleLength: plan.itinerary?.schedule?.length,
+      localInsightsLength: plan.itinerary?.localInsights?.length,
+      budgetAmount: plan.itinerary?.budget?.amount
+    });
+
+    // ── 2. Build Gemini prompt for Q&A and modifications ──────────────────────────
     const prompt = `
-You are an AI travel concierge helping a traveller refine an existing itinerary.
+You are an AI travel concierge helping a traveller with their existing itinerary. You can both answer questions and make modifications.
+
+CAPABILITIES:
+1. **Answer Questions**: Provide detailed information about the itinerary (activities, costs, locations, timing, etc.)
+2. **Make Modifications**: Apply changes to the itinerary when explicitly requested
 
 TASKS:
 1. Inspect the current itinerary object provided below.
-2. Analyse the user's new message.
-3. Decide whether the message implies a modification to the itinerary (dates, activities, budget, etc.).
-4. If a change is needed, output ONLY a JSON Patch array (RFC‑6902) that transforms the itinerary.
-5. If no change is necessary, output an empty array [].
-6. Always include an "assistant_response" — a natural‑language reply to the user, acknowledging any changes or responding to questions.
+2. Analyze the user's message to determine if it's:
+   - A QUESTION about the itinerary (asking for information, clarification, details)
+   - A MODIFICATION REQUEST (asking to change, add, remove, or adjust something)
+3. For QUESTIONS: Provide detailed, helpful answers based on the itinerary data
+4. For MODIFICATIONS: Generate JSON Patch operations (RFC-6902) to transform the itinerary
+5. Always provide a natural-language response
 
-Return JSON with exactly these keys:
+RESPONSE FORMAT:
 {
-  "patch": <RFC‑6902 array>,
-  "assistant_response": <string>,
-  "suggestions": <string[] | optional quick replies>
+  "interaction_type": "question" | "modification",
+  "patch": <RFC‑6902 array - only for modifications, empty array for questions>,
+  "assistant_response": <detailed response to user>,
+  "suggestions": <string[] - relevant follow-up questions or actions>
 }
+
+EXAMPLES:
+- "What activities are planned for day 2?" → interaction_type: "question", patch: []
+- "How much will the hotel cost?" → interaction_type: "question", patch: []
+- "What time does the museum tour start?" → interaction_type: "question", patch: []
+- "Tell me about the restaurants recommended" → interaction_type: "question", patch: []
+- "Add a food tour to day 3" → interaction_type: "modification", patch: [...]
+- "Remove the museum visit" → interaction_type: "modification", patch: [...]
+- "Change the hotel to something cheaper" → interaction_type: "modification", patch: [...]
+- "Increase the budget for meals" → interaction_type: "modification", patch: [...]
+
+For QUESTIONS: Provide detailed, informative answers with specific details from the itinerary.
+For MODIFICATIONS: Generate appropriate JSON patch operations and explain what will be changed.
 
 ### Current Itinerary
 \`\`\`json
@@ -73,26 +130,31 @@ ${JSON.stringify(plan.itinerary, null, 2)}
     const { text } = await geminiRes.response;
     const aiJson = JSON.parse(text());
 
+    const interactionType = aiJson.interaction_type || 'question';
     const patch: any[] = Array.isArray(aiJson.patch) ? aiJson.patch : [];
-    const assistantResponse: string =
-      aiJson.assistant_response || 'Okay!';
-    const suggestions: string[] = Array.isArray(aiJson.suggestions)
-      ? aiJson.suggestions
-      : [];
+    const assistantResponse: string = aiJson.assistant_response || 'I understand your request.';
+    const suggestions: string[] = Array.isArray(aiJson.suggestions) ? aiJson.suggestions : [];
+
+    console.log(`[chat-with-plan] Interaction type: ${interactionType}, patches: ${patch.length}`);
 
     // ── 3. Apply patch if needed ──────────────────────────────────────────────────
     let patchApplied = false;
     if (patch.length > 0) {
+      console.log(`[chat-with-plan] Applying ${patch.length} patch operations:`, patch);
       const patched = applyPatch({ ...plan.itinerary }, patch, true, false);
       plan.itinerary = patched.newDocument;
       patchApplied = true;
       await CacheManager.set(planKey, plan, 86_400);
+      console.log(`[chat-with-plan] Plan updated and cached for ${planId}`);
+    } else {
+      console.log(`[chat-with-plan] No patches to apply for ${planId}`);
     }
 
     // ── 4. Return to client ───────────────────────────────────────────────────────
     return NextResponse.json({
       response: assistantResponse,
       suggestions,
+      interactionType,
       updatedPlan: patchApplied ? plan : null,
     });
   } catch (err) {

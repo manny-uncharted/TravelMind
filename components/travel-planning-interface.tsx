@@ -321,9 +321,19 @@ export function TravelPlanningInterface() {
   };
 
   const handlePlanUpdate = (updatedPlan: any) => {
+    console.log('🔄 handlePlanUpdate called with:', updatedPlan);
     setWorkflowData(updatedPlan);
     setItinerary(updatedPlan.itinerary);
     setRecommendations(updatedPlan.recommendations || []);
+    
+    // Auto-switch to itinerary tab to show changes
+    console.log('🔄 Switching to itinerary tab...');
+    setTimeout(() => {
+      setActiveTab('itinerary');
+      console.log('🔄 Tab switched to itinerary');
+    }, 500);
+    
+    toast.success('Itinerary updated! Switching to Itinerary tab...');
   };
 
   const handleCitySwitch = async (city: string) => {
@@ -722,7 +732,12 @@ export function TravelPlanningInterface() {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <ChatInterface
                         planId={jobId || 'current'}
-                        initialData={workflowData}
+                        initialData={{
+                          itinerary: itinerary,
+                          recommendations: recommendations,
+                          workflow_data: workflowData,
+                          orchestration: orchestrationData
+                        }}
                         onPlanUpdate={handlePlanUpdate}
                       />
                       <div className="space-y-4">

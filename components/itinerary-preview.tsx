@@ -48,6 +48,12 @@ export function ItineraryPreview({
   workflowData,
   onSelectCity
 }: ItineraryPreviewProps) {
+  console.log('🚨 ItineraryPreview component called', {
+    hasPreferences: !!preferences,
+    hasItinerary: !!itinerary,
+    hasWorkflowData: !!workflowData,
+    scheduleLength: itinerary?.schedule?.length
+  });
   /* ---------- derived data ---------- */
   const cityAnalysis   = workflowData?.city_analysis;
   const localInsights  = workflowData?.local_insights;
