@@ -16,7 +16,10 @@ import {
   Sparkles,
   Calendar,
   MapPin,
-  DollarSign
+  DollarSign,
+  HelpCircle,
+  Edit3,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -29,6 +32,7 @@ interface ChatMessage {
   content: string;
   timestamp: number;
   suggestions?: string[];
+  interactionType?: 'question' | 'modification';
 }
 
 interface ChatInterfaceProps {
@@ -38,27 +42,36 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ planId, initialData, onPlanUpdate }: ChatInterfaceProps) {
+  console.log('🗣️ ChatInterface initialized with:', { planId, initialData: !!initialData, onPlanUpdate: !!onPlanUpdate });
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
       role: 'assistant',
       content: `Hello! I'm your AI travel assistant. I've analyzed your travel plan for **${initialData?.itinerary?.destination || 'your destination'}**. 
 
-I can help you:
-- Modify your itinerary
-- Add or remove activities
-- Adjust your budget
-- Find better accommodations
-- Suggest alternative experiences
+I can help you in two ways:
 
-What would you like to change or explore?`,
+🤔 **Ask Questions**: Get details about your itinerary, costs, activities, locations, and timing
+✏️ **Make Changes**: Modify your itinerary, add/remove activities, adjust budget, or find alternatives
+
+**Example Questions:**
+- "What's planned for day 2?"
+- "How much will accommodation cost?"
+- "What time does the museum tour start?"
+
+**Example Modifications:**
+- "Add a food tour to day 3"
+- "Find cheaper hotel options"
+- "Remove the early morning activity"
+
+What would you like to know or change?`,
       timestamp: Date.now(),
       suggestions: [
-        'Add more cultural activities',
-        'Find budget-friendly options',
-        'Suggest romantic restaurants',
-        'Add adventure activities',
-        'Optimize travel routes'
+        '? What activities are planned for each day?',
+        '💰 What\'s the total budget breakdown?',
+        '🍽️ Add more restaurant recommendations',
+        '🏛️ Include more cultural experiences',
+        '💡 Suggest budget-friendly alternatives'
       ]
     }
   ]);
@@ -104,20 +117,41 @@ What would you like to change or explore?`,
 
       const result = await response.json();
 
+      // Create assistant response message
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: result.response,
         timestamp: Date.now(),
-        suggestions: result.suggestions
+        suggestions: result.suggestions,
+        interactionType: result.interactionType
       };
 
       setMessages(prev => [...prev, assistantMessage]);
 
-      // If the plan was updated, notify parent component
-      if (result.updatedPlan && onPlanUpdate) {
+      // Handle different interaction types
+      if (result.interactionType === 'modification' && result.updatedPlan && onPlanUpdate) {
+        console.log('🔄 Sending plan update to parent:', result.updatedPlan);
         onPlanUpdate(result.updatedPlan);
-        toast.success('Travel plan updated!');
+        toast.success('Travel plan updated successfully! Check the Itinerary tab to see changes.');
+        
+        // Add a visual indicator message for modifications
+        const updateNotification: ChatMessage = {
+          id: (Date.now() + 2).toString(),
+          role: 'assistant',
+          content: '✅ **Itinerary Modified!** Your travel plan has been updated. Switch to the Itinerary tab to see the changes.',
+          timestamp: Date.now(),
+          interactionType: 'modification'
+        };
+        
+        setTimeout(() => {
+          setMessages(prev => [...prev, updateNotification]);
+        }, 1000);
+      } else if (result.interactionType === 'question') {
+        console.log('💬 Question answered about the itinerary');
+        // You can add additional logic here for question-specific handling
+      } else {
+        console.log('ℹ️ No plan update needed or no callback provided');
       }
 
     } catch (error) {
@@ -157,6 +191,16 @@ What would you like to change or explore?`,
             AI Assistant
           </Badge>
         </CardTitle>
+        <div className="flex gap-2 text-xs">
+          <Badge variant="secondary" className="flex items-center gap-1">
+            <HelpCircle className="w-3 h-3" />
+            Ask Questions
+          </Badge>
+          <Badge variant="secondary" className="flex items-center gap-1">
+            <Edit3 className="w-3 h-3" />
+            Make Changes
+          </Badge>
+        </div>
       </CardHeader>
       
       <CardContent className="flex-1 flex flex-col p-0">
@@ -180,10 +224,29 @@ What would you like to change or explore?`,
                   )}
                   
                   <div className={`max-w-[80%] ${message.role === 'user' ? 'order-1' : ''}`}>
+                    {/* Add interaction type indicator for assistant messages */}
+                    {message.role === 'assistant' && message.interactionType && (
+                      <div className="flex items-center gap-1 mb-1 text-xs text-gray-500">
+                        {message.interactionType === 'question' ? (
+                          <>
+                            <HelpCircle className="w-3 h-3" />
+                            <span>Information</span>
+                          </>
+                        ) : message.interactionType === 'modification' ? (
+                          <>
+                            <Edit3 className="w-3 h-3" />
+                            <span>Modification Applied</span>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                    
                     <div className={`rounded-lg p-3 ${
                       message.role === 'user' 
                         ? 'bg-blue-600 text-white ml-auto' 
-                        : 'bg-gray-100 dark:bg-gray-800'
+                        : message.interactionType === 'modification'
+                          ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                          : 'bg-gray-100 dark:bg-gray-800'
                     }`}>
                       {message.role === 'assistant' ? (
                         <ReactMarkdown 
@@ -255,7 +318,7 @@ What would you like to change or explore?`,
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask me to modify your travel plan..."
+              placeholder="Ask questions or request changes to your travel plan..."
               disabled={isLoading}
               className="flex-1"
             />
@@ -277,6 +340,24 @@ What would you like to change or explore?`,
               variant="ghost"
               size="sm"
               className="text-xs h-7"
+              onClick={() => handleSendMessage('What\'s the total cost breakdown?')}
+            >
+              <HelpCircle className="w-3 h-3 mr-1" />
+              Cost Info
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => handleSendMessage('What activities are planned for each day?')}
+            >
+              <Info className="w-3 h-3 mr-1" />
+              Daily Plans
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
               onClick={() => handleSendMessage('Add more budget-friendly options')}
             >
               <DollarSign className="w-3 h-3 mr-1" />
@@ -286,19 +367,10 @@ What would you like to change or explore?`,
               variant="ghost"
               size="sm"
               className="text-xs h-7"
-              onClick={() => handleSendMessage('Suggest alternative activities')}
+              onClick={() => handleSendMessage('Add cultural activities to day 2')}
             >
               <Calendar className="w-3 h-3 mr-1" />
-              Activities
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs h-7"
-              onClick={() => handleSendMessage('Find better locations')}
-            >
-              <MapPin className="w-3 h-3 mr-1" />
-              Locations
+              Add Activities
             </Button>
           </div>
         </div>

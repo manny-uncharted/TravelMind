@@ -1,97 +1,182 @@
+// app/api/chat-with-plan/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { CacheManager, CACHE_KEYS, CacheKeyHelpers } from '@/lib/redis';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { CacheManager, CACHE_KEYS } from '@/lib/redis';
+import { applyPatch } from 'fast-json-patch';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-
-export const dynamic = 'force-dynamic';
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const { planId, message, currentPlan, chatHistory } = await request.json();
+    const {
+      planId,
+      message,
+      role = 'user',
+      currentPlan,
+    } = await req.json();
 
-    if (!planId || !message || !currentPlan) {
+    if (!planId || !message) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
+        { error: 'planId and message are required' },
+        { status: 400 },
       );
     }
 
+        // ── 1. Fetch (or seed) cached plan ────────────────────────────────────────────
+    // Support both old format (planId) and new location-based keys
+    let planKey: string;
+    
+    if (planId.startsWith('travel_plan:')) {
+      // New format: already a complete cache key
+      planKey = planId;
+    } else if (planId === 'current' || planId.length < 20) {
+      // Old format: fallback to generic key (for backward compatibility)
+      planKey = CACHE_KEYS.TRAVEL_PLAN(planId);
+    } else {
+      // Assume it's a location-based key
+      planKey = planId;
+    }
+    
+    console.log(`[chat-with-plan] Using cache key: ${planKey}`);
+    
+    let plan = await CacheManager.get<any>(planKey);
+
+    if (!plan && currentPlan) {
+      // Ensure the plan structure is correct for caching
+      const normalizedPlan = {
+        itinerary: currentPlan.itinerary || null,
+        recommendations: currentPlan.recommendations || [],
+        workflow_data: currentPlan.workflow_data || {},
+        orchestration: currentPlan.orchestration || {}
+      };
+      
+      await CacheManager.set(planKey, normalizedPlan, 86_400); // 24 h
+      plan = normalizedPlan;
+      console.log(`[chat-with-plan] seeded cache for ${planId}`);
+    }
+
+    // If currentPlan is provided and differs from cached plan, update the cache
+    if (currentPlan && plan) {
+      const hasItinerary = !!currentPlan.itinerary;
+      const cachedHasItinerary = !!plan.itinerary;
+      
+      // If currentPlan has itinerary but cached doesn't, update cache
+      if (hasItinerary && !cachedHasItinerary) {
+        console.log(`[chat-with-plan] Updating cache with fresh itinerary data for ${planId}`);
+        const normalizedPlan = {
+          itinerary: currentPlan.itinerary || null,
+          recommendations: currentPlan.recommendations || [],
+          workflow_data: currentPlan.workflow_data || {},
+          orchestration: currentPlan.orchestration || {}
+        };
+        
+        await CacheManager.set(planKey, normalizedPlan, 86_400);
+        plan = normalizedPlan;
+      }
+    }
+
+    if (!plan) {
+      return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
+    }
+
+    // Debug: Log the structure of the cached plan
+    console.log('[chat-with-plan] Plan structure:', {
+      hasItinerary: !!plan.itinerary,
+      planKeys: Object.keys(plan),
+      itineraryKeys: plan.itinerary ? Object.keys(plan.itinerary) : null,
+      scheduleLength: plan.itinerary?.schedule?.length,
+      localInsightsLength: plan.itinerary?.localInsights?.length,
+      budgetAmount: plan.itinerary?.budget?.amount
+    });
+
+    // ── 2. Build Gemini prompt for Q&A and modifications ──────────────────────────
+    const prompt = `
+You are an AI travel concierge helping a traveller with their existing itinerary. You can both answer questions and make modifications.
+
+CAPABILITIES:
+1. **Answer Questions**: Provide detailed information about the itinerary (activities, costs, locations, timing, etc.)
+2. **Make Modifications**: Apply changes to the itinerary when explicitly requested
+
+TASKS:
+1. Inspect the current itinerary object provided below.
+2. Analyze the user's message to determine if it's:
+   - A QUESTION about the itinerary (asking for information, clarification, details)
+   - A MODIFICATION REQUEST (asking to change, add, remove, or adjust something)
+3. For QUESTIONS: Provide detailed, helpful answers based on the itinerary data
+4. For MODIFICATIONS: Generate JSON Patch operations (RFC-6902) to transform the itinerary
+5. Always provide a natural-language response
+
+RESPONSE FORMAT:
+{
+  "interaction_type": "question" | "modification",
+  "patch": <RFC‑6902 array - only for modifications, empty array for questions>,
+  "assistant_response": <detailed response to user>,
+  "suggestions": <string[] - relevant follow-up questions or actions>
+}
+
+EXAMPLES:
+- "What activities are planned for day 2?" → interaction_type: "question", patch: []
+- "How much will the hotel cost?" → interaction_type: "question", patch: []
+- "What time does the museum tour start?" → interaction_type: "question", patch: []
+- "Tell me about the restaurants recommended" → interaction_type: "question", patch: []
+- "Add a food tour to day 3" → interaction_type: "modification", patch: [...]
+- "Remove the museum visit" → interaction_type: "modification", patch: [...]
+- "Change the hotel to something cheaper" → interaction_type: "modification", patch: [...]
+- "Increase the budget for meals" → interaction_type: "modification", patch: [...]
+
+For QUESTIONS: Provide detailed, informative answers with specific details from the itinerary.
+For MODIFICATIONS: Generate appropriate JSON patch operations and explain what will be changed.
+
+### Current Itinerary
+\`\`\`json
+${JSON.stringify(plan.itinerary, null, 2)}
+\`\`\`
+
+### User Message
+"${message}"
+`;
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
-    // Build context from current plan
-    const planContext = `
-Current Travel Plan:
-- Destination: ${currentPlan.itinerary?.destination || 'Unknown'}
-- Budget: ${currentPlan.travel_logistics?.totalBudget?.amount || 'Unknown'}
-- Schedule: ${JSON.stringify(currentPlan.travel_logistics?.schedule || [])}
-- Local Insights: ${JSON.stringify(currentPlan.local_insights?.insights || [])}
-- Recommendations: ${JSON.stringify(currentPlan.city_analysis?.alternatives || [])}
-`;
-
-    // Build chat history context
-    const chatContext = chatHistory?.slice(-5).map((msg: any) => 
-      `${msg.role}: ${msg.content}`
-    ).join('\n') || '';
-
-    const prompt = `
-You are a helpful AI travel assistant. The user has a travel plan and wants to modify it.
-
-${planContext}
-
-Recent conversation:
-${chatContext}
-
-User's new message: "${message}"
-
-Please respond helpfully and suggest specific modifications if requested. If the user wants to change something specific about their plan, provide detailed suggestions.
-
-Also suggest 3-5 quick follow-up questions or actions the user might want to take, formatted as an array.
-
-Respond in JSON format:
-{
-  "response": "Your helpful response here",
-  "suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"],
-  "planModified": false,
-  "modifications": {}
-}
-`;
-
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
+    const geminiRes = await model.generateContent({
+      contents: [{ role, parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json' },
     });
 
-    const response = await result.response;
-    const aiResponse = JSON.parse(await response.text());
+    const { text } = await geminiRes.response;
+    const aiJson = JSON.parse(text());
 
-    // Cache the chat message
-    await CacheManager.addToList(CACHE_KEYS.CHAT_HISTORY(planId), {
-      role: 'user',
-      content: message,
-      timestamp: Date.now()
-    });
+    const interactionType = aiJson.interaction_type || 'question';
+    const patch: any[] = Array.isArray(aiJson.patch) ? aiJson.patch : [];
+    const assistantResponse: string = aiJson.assistant_response || 'I understand your request.';
+    const suggestions: string[] = Array.isArray(aiJson.suggestions) ? aiJson.suggestions : [];
 
-    await CacheManager.addToList(CACHE_KEYS.CHAT_HISTORY(planId), {
-      role: 'assistant',
-      content: aiResponse.response,
-      timestamp: Date.now()
-    });
+    console.log(`[chat-with-plan] Interaction type: ${interactionType}, patches: ${patch.length}`);
 
+    // ── 3. Apply patch if needed ──────────────────────────────────────────────────
+    let patchApplied = false;
+    if (patch.length > 0) {
+      console.log(`[chat-with-plan] Applying ${patch.length} patch operations:`, patch);
+      const patched = applyPatch({ ...plan.itinerary }, patch, true, false);
+      plan.itinerary = patched.newDocument;
+      patchApplied = true;
+      await CacheManager.set(planKey, plan, 86_400);
+      console.log(`[chat-with-plan] Plan updated and cached for ${planId}`);
+    } else {
+      console.log(`[chat-with-plan] No patches to apply for ${planId}`);
+    }
+
+    // ── 4. Return to client ───────────────────────────────────────────────────────
     return NextResponse.json({
-      success: true,
-      response: aiResponse.response,
-      suggestions: aiResponse.suggestions || [],
-      updatedPlan: aiResponse.planModified ? aiResponse.modifications : null
+      response: assistantResponse,
+      suggestions,
+      interactionType,
+      updatedPlan: patchApplied ? plan : null,
     });
-
-  } catch (error) {
-    console.error('Chat error:', error);
+  } catch (err) {
+    console.error('[chat-with-plan] error:', err);
     return NextResponse.json(
-      { error: 'Failed to process chat message' },
-      { status: 500 }
+      { error: 'Internal server error' },
+      { status: 500 },
     );
   }
 }

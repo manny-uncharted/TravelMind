@@ -1,5 +1,5 @@
-
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { fetchTopPlaces, fetchFlightOptions } from '../tools/tavily-wrapper';   // ← adjust path if needed
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
@@ -19,6 +19,8 @@ export interface Activity {
   image?: string;
   description?: string;
   tips?: string[];
+  localCurrency?: string;
+  culturalNotes?: string;
 }
 
 export interface DaySchedule {
@@ -57,10 +59,9 @@ export interface TravelLogistics {
   };
   calculations: any[];
   logistics: {
-    transportation: string[];
-    packing: string[];
-    documents: string[];
-    emergency: any;
+    transportation: string;
+    packingTips: string[];
+    localTips: string[];
   };
   confidence: number;
 }
@@ -81,365 +82,448 @@ export class TravelConcierge {
     budget: string
   ): Promise<TravelLogistics> {
     console.log(`✈️ Travel Concierge Agent: Creating diverse itinerary for ${city}`);
-    
+
     const days = this.calculateDays(startDate, endDate);
-    
+
     const prompt = `
-      As a Travel Concierge AI agent, create a comprehensive and DIVERSE travel logistics plan for ${city}:
-      
-      Trip Details:
-      - Destination: ${city}
-      - Dates: ${startDate} to ${endDate} (${days} days)
-      - Travelers: ${travelers}
-      - Budget Range: ${budget}
-      - Local Insights: ${JSON.stringify(insights)}
-      
-      CRITICAL REQUIREMENTS:
-      1. Each day must have a UNIQUE theme and completely different activities
-      2. Include SPECIFIC places with actual names, addresses, and descriptions
-      3. Vary neighborhoods - explore different areas of ${city} each day
-      4. Include diverse activity types: cultural, food, nature, shopping, entertainment
-      5. Provide specific restaurant names, attraction names, and exact locations
-      6. Include realistic timing and logical geographical routing
-      7. Add specific tips and insider knowledge for each location
-      
-      Day Themes (vary these):
-      - Historic & Cultural Exploration
-      - Food & Market Discovery
-      - Nature & Outdoor Adventures
-      - Art & Museum Day
-      - Local Neighborhoods & Hidden Gems
-      - Shopping & Entertainment
-      - Relaxation & Wellness
-      
-      For each activity, provide:
-      - Specific place name (not generic descriptions)
-      - Exact address or area
-      - Detailed description of what to expect
-      - Practical tips and insider knowledge
-      - Realistic costs and timing
-      - Booking requirements
-      
-      Make each day feel like a completely different experience in ${city}.
-    `;
+As a Travel Concierge AI agent, create a comprehensive and DIVERSE travel logistics plan for ${city}:
+
+Trip Details:
+- Destination: ${city}
+- Dates: ${startDate} to ${endDate} (${days} days)
+- Travelers: ${travelers}
+- Budget Range: ${budget}
+- Local Insights: ${JSON.stringify(insights)}
+
+CRITICAL REQUIREMENTS:
+1. Each day must have a UNIQUE theme and completely different activities
+2. Include SPECIFIC places with actual names, addresses, and descriptions
+3. Vary neighborhoods - explore different areas of ${city} each day
+4. Include diverse activity types: cultural, food, nature, shopping, entertainment
+5. Provide specific restaurant names, attraction names, and exact locations
+6. Include realistic timing and logical geographical routing
+7. Add specific tips and insider knowledge for each location
+8. NEVER truncate days – always cover the full ${days}-day span, creating new themes when templates run out.
+
+Day Themes (examples – feel free to add more):
+- Historic & Cultural Exploration
+- Food & Market Discovery
+- Nature & Outdoor Adventures
+- Art & Museum Day
+- Local Neighborhoods & Hidden Gems
+- Shopping & Entertainment
+- Relaxation & Wellness
+
+FOR EACH ACTIVITY, INCLUDE:
+- **Tips**: Practical insider knowledge (e.g., "Ask for today's special", "Best time to visit is early morning", "Say 'anyeonghaseyo' as greeting", "Try the local delicacy")
+- **Exact Location**: Specific address, district, or landmark
+- **Local Currency Amount**: Prices in local currency (e.g., "₩15,000" for Seoul, "€25" for Paris, "¥3,000" for Tokyo)
+- **Cultural Context**: What makes this place special, local customs, or etiquette tips
+- **Booking Requirements**: Whether advance booking is needed
+
+Make each activity feel like having a local tour guide providing insider knowledge and cultural context.`;
 
     try {
       const result = await this.model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
-          responseMimeType: "application/json",
+          responseMimeType: 'application/json',
           responseSchema: {
-            type: "OBJECT",
+            type: 'OBJECT',
             properties: {
-              schedule: {
-                type: "ARRAY",
-                description: "Day-by-day diverse itinerary schedule",
+              schedule: { 
+                type: 'ARRAY',
                 items: {
-                  type: "OBJECT",
+                  type: 'OBJECT',
                   properties: {
-                    day: { type: "NUMBER" },
-                    date: { type: "STRING" },
-                    title: { type: "STRING" },
-                    theme: { type: "STRING" },
+                    day: { type: 'NUMBER' },
+                    date: { type: 'STRING' },
+                    title: { type: 'STRING' },
+                    theme: { type: 'STRING' },
                     activities: {
-                      type: "ARRAY",
+                      type: 'ARRAY',
                       items: {
-                        type: "OBJECT",
+                        type: 'OBJECT',
                         properties: {
-                          time: { type: "STRING" },
-                          activity: { type: "STRING" },
-                          type: { 
-                            type: "STRING",
-                            enum: ["transport", "accommodation", "sightseeing", "dining", "leisure", "shopping", "cultural"]
-                          },
-                          duration: { type: "STRING" },
-                          cost: { type: "STRING" },
-                          location: { type: "STRING" },
-                          specificPlace: { type: "STRING" },
-                          address: { type: "STRING" },
-                          bookingRequired: { type: "BOOLEAN" },
-                          notes: { type: "STRING" },
-                          description: { type: "STRING" },
+                          time: { type: 'STRING' },
+                          activity: { type: 'STRING' },
+                          type: { type: 'STRING' },
+                          duration: { type: 'STRING' },
+                          cost: { type: 'STRING' },
+                          location: { type: 'STRING' },
+                          specificPlace: { type: 'STRING' },
+                          address: { type: 'STRING' },
+                          description: { type: 'STRING' },
                           tips: {
-                            type: "ARRAY",
-                            items: { type: "STRING" }
-                          }
+                            type: 'ARRAY',
+                            items: { type: 'STRING' }
+                          },
+                          localCurrency: { type: 'STRING' },
+                          culturalNotes: { type: 'STRING' },
+                          bookingRequired: { type: 'BOOLEAN' }
                         },
-                        required: ["time", "activity", "type", "specificPlace", "description"]
+                        required: ['time', 'activity', 'type', 'tips', 'localCurrency']
                       }
                     },
-                    dailyBudget: { type: "STRING" },
-                    neighborhoods: {
-                      type: "ARRAY",
-                      items: { type: "STRING" }
-                    },
+                    dailyBudget: { type: 'STRING' },
                     highlights: {
-                      type: "ARRAY",
-                      items: { type: "STRING" }
-                    },
-                    notes: {
-                      type: "ARRAY",
-                      items: { type: "STRING" }
+                      type: 'ARRAY',
+                      items: { type: 'STRING' }
                     }
                   },
-                  required: ["day", "date", "title", "theme", "activities", "dailyBudget", "neighborhoods", "highlights"]
+                  required: ['day', 'date', 'title', 'activities', 'dailyBudget']
                 }
               },
-              totalBudget: {
-                type: "OBJECT",
+              totalBudget: { 
+                type: 'OBJECT',
                 properties: {
-                  amount: { type: "STRING" },
-                  currency: { type: "STRING" },
+                  amount: { type: 'STRING' },
                   breakdown: {
-                    type: "OBJECT",
+                    type: 'OBJECT',
                     properties: {
-                      accommodation: { type: "STRING" },
-                      food: { type: "STRING" },
-                      activities: { type: "STRING" },
-                      transport: { type: "STRING" },
-                      misc: { type: "STRING" }
+                      accommodation: { type: 'STRING' },
+                      food: { type: 'STRING' },
+                      activities: { type: 'STRING' },
+                      transportation: { type: 'STRING' }
                     },
-                    required: ["accommodation", "food", "activities", "transport", "misc"]
+                    required: ['accommodation', 'food', 'activities', 'transportation']
                   }
                 },
-                required: ["amount", "currency", "breakdown"]
+                required: ['amount', 'breakdown']
               },
-              logistics: {
-                type: "OBJECT",
+              logistics: { 
+                type: 'OBJECT',
                 properties: {
-                  transportation: {
-                    type: "ARRAY",
-                    items: { type: "STRING" }
+                  transportation: { type: 'STRING' },
+                  packingTips: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' }
                   },
-                  packing: {
-                    type: "ARRAY",
-                    items: { type: "STRING" }
-                  },
-                  documents: {
-                    type: "ARRAY",
-                    items: { type: "STRING" }
+                  localTips: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING' }
                   }
                 },
-                required: ["transportation", "packing", "documents"]
+                required: ['transportation', 'packingTips', 'localTips']
               },
-              confidence: { 
-                type: "NUMBER", 
-                minimum: 0, 
-                maximum: 1 
-              }
+              confidence: { type: 'NUMBER', minimum: 0, maximum: 1 }
             },
-            required: ["schedule", "totalBudget", "logistics", "confidence"]
+            required: ['schedule', 'totalBudget', 'logistics', 'confidence']
           }
         }
       });
-      
+
       const response = await result.response;
       const itinerary = JSON.parse(response.text());
-      
-      // Add calculations and booking info
+
+      // add calculations & bookings
       itinerary.calculations = this.generateCalculations(days, budget, travelers);
-      itinerary.bookingInfo = this.generateBookingInfo(city, startDate, endDate, itinerary.schedule);
-      
+      itinerary.bookingInfo  = await this.generateBookingInfo(
+        city,
+        startDate,
+        endDate,
+        itinerary.schedule
+      );
+
       console.log('✅ Travel Concierge Agent: Diverse itinerary complete', {
         days: itinerary.schedule?.length || 0,
         totalBudget: itinerary.totalBudget?.amount,
         confidence: itinerary.confidence
       });
-      
-      return itinerary;
-    } catch (error) {
-      console.error('❌ Travel Concierge Agent error:', error);
-      return this.getMockItinerary(city, startDate, endDate, travelers, budget, insights);
+
+      return itinerary as TravelLogistics;
+    } catch (err) {
+      console.error('❌ Travel Concierge Agent error – using mock:', err);
+      return await this.getMockItinerary(
+        city,
+        startDate,
+        endDate,
+        travelers,
+        budget,
+        insights
+      );
     }
   }
 
+  /* ───────────────────────── helpers ───────────────────────── */
+
   private calculateDays(startDate: string, endDate: string): number {
     const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays || 1;
+    const end   = new Date(endDate);
+    const diff  = Math.abs(end.valueOf() - start.valueOf());
+    return Math.max(1, Math.ceil(diff / 86_400_000)); // ms per day
   }
 
-  private addDays(date: string, days: number): string {
-    const result = new Date(date);
-    result.setDate(result.getDate() + days);
-    return result.toISOString().split('T')[0];
+  private addDays(date: string, offset: number): string {
+    const d = new Date(date);
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().split('T')[0];
   }
 
-  private generateCalculations(days: number, budget: string, travelers: string): any[] {
-    const budgetMultiplier = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1.0;
-    const groupMultiplier = travelers === '5+' ? 1.2 : 1.0;
-    const dailyBudget = Math.round(250 * budgetMultiplier * groupMultiplier);
+  private generateCalculations(days: number, budget: string, travelers: string) {
+    const multiplier = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1;
+    const group      = travelers === '5+' ? 1.2 : 1;
+    const daily      = Math.round(250 * multiplier * group);
 
     return [
       {
-        type: "daily_budget_breakdown",
-        totalDaily: dailyBudget,
-        accommodation: Math.round(dailyBudget * 0.35),
-        food: Math.round(dailyBudget * 0.30),
-        activities: Math.round(dailyBudget * 0.25),
-        transport: Math.round(dailyBudget * 0.10),
-        days: days,
-        totalTrip: dailyBudget * days
+        type   : 'daily_budget_breakdown',
+        totalDaily: daily,
+        accommodation: Math.round(daily * 0.35),
+        food        : Math.round(daily * 0.30),
+        activities  : Math.round(daily * 0.25),
+        transport   : Math.round(daily * 0.10),
+        days,
+        totalTrip   : daily * days
       },
       {
-        type: "group_considerations",
-        travelers: travelers,
-        groupMultiplier: groupMultiplier,
+        type: 'group_considerations',
+        travelers,
+        groupMultiplier: group,
         considerations: [
-          "Group discounts for activities",
-          "Shared accommodation costs",
-          "Transportation efficiency for groups"
+          'Group discounts for activities',
+          'Shared accommodation costs',
+          'Transportation efficiency for groups'
         ]
       }
     ];
   }
 
-  private generateBookingInfo(city: string, startDate: string, endDate: string, schedule: any[]): any {
+  private async generateBookingInfo(
+    city: string,
+    startDate: string,
+    endDate: string,
+    schedule: any[]
+  ) {
+    try {
+      // Get real booking options with enhanced search
+      const [hotels, restaurants, activities] = await Promise.all([
+        fetchTopPlaces(city, 'hotel', 6),
+        fetchTopPlaces(city, 'restaurant', 8),
+        fetchTopPlaces(city, 'activity', 10)
+      ]);
+
+      // Generate flight options (assuming international travel)
+      const flights = await fetchFlightOptions(
+        'International Departure',
+        city,
+        startDate,
+        endDate
+      );
+
+      // Extract restaurant recommendations from schedule
+      const scheduledRestaurants = schedule
+        .flatMap(day => day.activities || [])
+        .filter(activity => activity.type === 'dining' || activity.type === 'Food')
+        .map(activity => ({
+          name: activity.activity || activity.specificPlace || 'Restaurant',
+          link: `https://www.opentable.com/s?query=${encodeURIComponent(activity.activity || activity.specificPlace || city)}`,
+          blurb: activity.description || `Recommended dining spot in ${city}`,
+          category: 'restaurant',
+          city: city,
+          scheduledTime: activity.time,
+          cost: activity.cost
+        }));
+
+      // Extract activity bookings from schedule
+      const scheduledActivities = schedule
+        .flatMap(day => day.activities || [])
+        .filter(activity => activity.bookingRequired || activity.type === 'Cultural' || activity.type === 'Entertainment')
+        .map(activity => ({
+          name: activity.activity || activity.specificPlace || 'Activity',
+          link: `https://www.getyourguide.com/s/?q=${encodeURIComponent(activity.activity || activity.specificPlace || city)}`,
+          blurb: activity.description || `${activity.activity} - ${activity.duration || 'Duration varies'}`,
+          category: 'activity',
+          city: city,
+          scheduledTime: activity.time,
+          cost: activity.cost,
+          bookingRequired: activity.bookingRequired || false
+        }));
+
+      return {
+        hotels: hotels.slice(0, 5),
+        restaurants: [
+          ...scheduledRestaurants.slice(0, 3),
+          ...restaurants.filter(r => 
+            !scheduledRestaurants.some(sr => 
+              sr.name.toLowerCase().includes(r.name.toLowerCase().split(' ')[0])
+            )
+          ).slice(0, 3)
+        ],
+        activities: [
+          ...scheduledActivities.slice(0, 4),
+          ...activities.filter(a => 
+            !scheduledActivities.some(sa => 
+              sa.name.toLowerCase().includes(a.name.toLowerCase().split(' ')[0])
+            )
+          ).slice(0, 4)
+        ],
+        flights: flights,
+        bookingTips: [
+          `Book accommodations in ${city} at least 2-3 weeks in advance`,
+          'Many restaurants in ' + city + ' require reservations, especially for dinner',
+          'Popular attractions may sell out - book tickets online in advance',
+          'Consider purchasing a city pass for multiple attractions',
+          'Download local transport apps for easy navigation'
+        ],
+        localBookingServices: {
+          transportation: `${city} local transport passes and ride-sharing apps`,
+          tours: `Local tour operators and guides in ${city}`,
+          experiences: `Cultural experiences and workshops in ${city}`
+        }
+      };
+    } catch (error) {
+      console.error('Error generating booking info:', error);
+      // Fallback to basic booking information
+      return this.getFallbackBookingInfo(city, startDate, endDate);
+    }
+  }
+
+  private getFallbackBookingInfo(city: string, startDate: string, endDate: string) {
+    const citySlug = city.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    
     return {
       hotels: [
         {
-          name: `Premium Hotel ${city}`,
-          location: "City Center",
-          checkIn: startDate,
-          checkOut: endDate,
-          pricePerNight: "$200-400",
-          bookingDeadline: "2 weeks before travel",
-          amenities: ["WiFi", "Breakfast", "Concierge", "Spa"]
+          name: `Best Hotels in ${city}`,
+          link: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(city)}&dest_type=city`,
+          blurb: `Find and book the perfect hotel in ${city} with flexible cancellation options.`,
+          category: 'hotel',
+          city: city
+        },
+        {
+          name: `Luxury Accommodations ${city}`,
+          link: `https://www.expedia.com/Hotel-Search?destination=${encodeURIComponent(city)}`,
+          blurb: `Premium hotels and resorts in ${city} for a memorable stay.`,
+          category: 'hotel',
+          city: city
+        }
+      ],
+      restaurants: [
+        {
+          name: `Top Restaurants in ${city}`,
+          link: `https://www.opentable.com/s?query=${encodeURIComponent(city)}`,
+          blurb: `Make reservations at the best restaurants in ${city}.`,
+          category: 'restaurant',
+          city: city
+        }
+      ],
+      activities: [
+        {
+          name: `Things to Do in ${city}`,
+          link: `https://www.getyourguide.com/s/?q=${encodeURIComponent(city)}`,
+          blurb: `Book tours, attractions, and experiences in ${city}.`,
+          category: 'activity',
+          city: city
         }
       ],
       flights: [
         {
-          type: "International",
-          departure: "Home Airport",
-          arrival: `${city} Airport`,
-          date: startDate,
-          bookingDeadline: "1 month before travel",
-          notes: "Book early for better prices"
+          type: 'Flight Search' as const,
+          departure: 'Your Location',
+          arrival: city,
+          departureDate: startDate,
+          returnDate: endDate,
+          bookingLink: `https://www.skyscanner.com/routes/your-location/${citySlug}`,
+          notes: 'Compare flight prices and find the best deals',
+          estimatedPrice: 'Varies by departure location and season'
         }
       ],
-      activities: schedule?.flatMap(day => 
-        day.activities?.filter((activity: any) => activity.bookingRequired)
-          .map((activity: any) => ({
-            name: activity.activity,
-            place: activity.specificPlace,
-            date: day.date,
-            time: activity.time,
-            cost: activity.cost,
-            bookingRequired: true
-          })) || []
-      ) || [],
-      restaurants: [
-        {
-          name: "Local Fine Dining",
-          cuisine: "Local Specialty",
-          priceRange: "$$$",
-          reservationRequired: true,
-          bookingDeadline: "1 week before"
-        }
+      bookingTips: [
+        'Book early for better prices and availability',
+        'Check cancellation policies before booking',
+        'Consider travel insurance for international trips',
+        'Keep confirmation numbers and booking details handy'
       ]
     };
   }
 
-  private getMockItinerary(
+  /* ───────────── mock fallback + city‑specific builders ───────────── */
+
+  private async getMockItinerary(
     city: string,
     startDate: string,
     endDate: string,
     travelers: string,
     budget: string,
     insights: any[]
-  ): TravelLogistics {
-    const days = this.calculateDays(startDate, endDate);
-    const budgetMultiplier = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1.0;
-    const dailyBudget = Math.round(250 * budgetMultiplier);
-
-    // Generate city-specific diverse itinerary
-    const schedule: DaySchedule[] = this.generateCitySpecificItinerary(city, startDate, days, dailyBudget, insights);
+  ): Promise<TravelLogistics> {
+    const days         = this.calculateDays(startDate, endDate);
+    const bMult        = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1;
+    const dailyBudget  = Math.round(250 * bMult);
+    const schedule     = this.generateCitySpecificItinerary(
+      city,
+      startDate,
+      days,
+      dailyBudget,
+      insights
+    );
 
     return {
       schedule,
       totalBudget: {
-        amount: `$${dailyBudget * days}`,
-        currency: "USD",
+        amount   : `$${dailyBudget * days}`,
+        currency : 'USD',
         breakdown: {
           accommodation: `$${Math.round(dailyBudget * 0.35 * days)} (35%)`,
-          food: `$${Math.round(dailyBudget * 0.30 * days)} (30%)`,
-          activities: `$${Math.round(dailyBudget * 0.25 * days)} (25%)`,
-          transport: `$${Math.round(dailyBudget * 0.10 * days)} (10%)`,
-          misc: `$${Math.round(dailyBudget * 0.05 * days)} (5%)`
+          food        : `$${Math.round(dailyBudget * 0.30 * days)} (30%)`,
+          activities  : `$${Math.round(dailyBudget * 0.25 * days)} (25%)`,
+          transport   : `$${Math.round(dailyBudget * 0.10 * days)} (10%)`,
+          misc        : `$${Math.round(dailyBudget * 0.05 * days)} (5%)`
         }
       },
-      bookingInfo: this.generateBookingInfo(city, startDate, endDate, schedule),
+      bookingInfo : await this.generateBookingInfo(city, startDate, endDate, schedule),
       calculations: this.generateCalculations(days, budget, travelers),
-      logistics: {
-        transportation: [
-          `Purchase ${city} local transportation pass`,
-          `Download ${city} transit app`,
-          "Keep emergency taxi numbers handy",
-          `Research ${city} airport transfer options`
-        ],
-        packing: [
-          "Comfortable walking shoes",
-          "Weather-appropriate clothing for the season",
-          "Portable charger and local adapters",
-          "Travel insurance documents",
+      logistics   : {
+        transportation: `Purchase ${city} local transportation pass; Download ${city} transit app; Keep emergency taxi numbers handy`,
+        packingTips: [
+          'Comfortable walking shoes',
+          'Weather-appropriate clothing',
+          'Portable charger & adapters',
+          'Travel insurance documents',
           `Local currency for ${city}`
         ],
-        documents: [
-          "Valid passport (6+ months remaining)",
-          "Travel insurance policy",
-          "Hotel confirmation",
-          "Emergency contact information",
-          `Visa requirements for ${city} (if applicable)`
-        ],
-        emergency: {
-          police: "Local emergency number",
-          medical: "Local hospital contact",
-          embassy: "Home country embassy contact"
-        }
+        localTips: [
+          `Research ${city} local customs`,
+          'Learn basic local phrases',
+          'Download offline maps',
+          'Keep emergency contacts handy',
+          'Check local weather forecasts'
+        ]
       },
       confidence: 0.92
     };
   }
 
   private generateCitySpecificItinerary(
-    city: string,
-    startDate: string,
-    days: number,
-    dailyBudget: number,
-    insights: any[]
+    city        : string,
+    startDate   : string,
+    days        : number,
+    dailyBudget : number,
+    insights    : any[]
   ): DaySchedule[] {
-    const cityLower = city.toLowerCase();
-    
-    // City-specific itineraries with real places and diverse activities
-    if (cityLower.includes('barcelona')) {
-      return this.generateBarcelonaItinerary(startDate, days, dailyBudget);
-    } else if (cityLower.includes('tokyo')) {
-      return this.generateTokyoItinerary(startDate, days, dailyBudget);
-    } else if (cityLower.includes('bangkok')) {
-      return this.generateBangkokItinerary(startDate, days, dailyBudget);
-    } else if (cityLower.includes('prague')) {
-      return this.generatePragueItinerary(startDate, days, dailyBudget);
-    } else if (cityLower.includes('singapore')) {
-      return this.generateSingaporeItinerary(startDate, days, dailyBudget);
-    } else if (cityLower.includes('amsterdam')) {
-      return this.generateAmsterdamItinerary(startDate, days, dailyBudget);
-    }
-    
-    // Generic diverse itinerary for other cities
+    const c = city.toLowerCase();
+    if (c.includes('barcelona')) return this.generateBarcelonaItinerary(startDate, days, dailyBudget);
+    if (c.includes('tokyo'))     return this.generateTokyoItinerary(startDate, days, dailyBudget);
+    if (c.includes('bangkok'))   return this.generateBangkokItinerary(startDate, days, dailyBudget);
+    if (c.includes('prague'))    return this.generatePragueItinerary(startDate, days, dailyBudget);
+    if (c.includes('singapore')) return this.generateSingaporeItinerary(startDate, days, dailyBudget);
+    if (c.includes('amsterdam')) return this.generateAmsterdamItinerary(startDate, days, dailyBudget);
+    if (c.includes('seoul'))     return this.generateSeoulItinerary(startDate, days, dailyBudget);
     return this.generateGenericDiverseItinerary(city, startDate, days, dailyBudget, insights);
   }
 
+  /* ─────────────── city builders (only change is length→days) ─────────────── */
+
   private generateBarcelonaItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
     const themes = [
-      { title: "Gaudí's Architectural Wonders", theme: "Architecture & Art", neighborhoods: ["Eixample", "Gràcia"] },
-      { title: "Gothic Quarter & Historic Barcelona", theme: "History & Culture", neighborhoods: ["Barrio Gótico", "El Born"] },
-      { title: "Beach, Markets & Local Life", theme: "Local Life & Relaxation", neighborhoods: ["Barceloneta", "El Raval"] },
-      { title: "Montjuïc & Panoramic Views", theme: "Nature & Views", neighborhoods: ["Montjuïc", "Poble Sec"] },
-      { title: "Food Tour & Tapas Culture", theme: "Culinary Adventure", neighborhoods: ["Gràcia", "Sant Antoni"] }
+      { title: "Gaudí's Architectural Wonders",                theme: 'Architecture & Art', neighborhoods: ['Eixample', 'Gràcia'] },
+      { title: 'Gothic Quarter & Historic Barcelona',           theme: 'History & Culture',  neighborhoods: ['Barrio Gótico', 'El Born'] },
+      { title: 'Beach, Markets & Local Life',                   theme: 'Local Life & Relaxation', neighborhoods: ['Barceloneta', 'El Raval'] },
+      { title: 'Montjuïc & Panoramic Views',                    theme: 'Nature & Views',     neighborhoods: ['Montjuïc', 'Poble Sec'] },
+      { title: 'Food Tour & Tapas Culture',                     theme: 'Culinary Adventure', neighborhoods: ['Gràcia', 'Sant Antoni'] }
     ];
-
+    // const activities: any[] = [ /* … original three‑day arrays … */ ];
     const activities = [
       // Day 1: Gaudí's Architecture
       [
@@ -611,33 +695,35 @@ export class TravelConcierge {
       ]
     ];
 
-    return Array.from({ length: Math.min(days, themes.length) }, (_, i) => ({
-      day: i + 1,
-      date: this.addDays(startDate, i),
-      title: themes[i].title,
-      theme: themes[i].theme,
-      activities: activities[i] || activities[0],
-      dailyBudget: `$${dailyBudget}`,
-      neighborhoods: themes[i].neighborhoods,
-      highlights: activities[i]?.map(a => a.specificPlace) || [],
-      notes: [
-        "Comfortable walking shoes essential",
-        "Many attractions offer student/senior discounts",
-        "Siesta time: 2-5 PM many shops close",
-        "Dinner typically starts after 9 PM"
-      ]
-    }));
+    return Array.from({ length: days }, (_, i) => {
+      const idx = i % themes.length;
+      return {
+        day : i + 1,
+        date: this.addDays(startDate, i),
+        title       : themes[idx].title,
+        theme       : themes[idx].theme,
+        activities  : activities[idx] || activities[0],
+        dailyBudget : `$${dailyBudget}`,
+        neighborhoods: themes[idx].neighborhoods,
+        highlights  : (activities[idx] || activities[0]).map((a: any) => a.specificPlace),
+        notes       : [
+          'Comfortable walking shoes essential',
+          'Many attractions offer student/senior discounts',
+          'Siesta time: 2‑5 PM many shops close',
+          'Dinner typically starts after 9 PM'
+        ]
+      };
+    });
   }
 
   private generateTokyoItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
     const themes = [
-      { title: "Traditional Tokyo: Temples & Gardens", theme: "Culture & Tradition", neighborhoods: ["Asakusa", "Ueno"] },
-      { title: "Modern Tokyo: Shibuya & Harajuku", theme: "Modern Culture & Fashion", neighborhoods: ["Shibuya", "Harajuku"] },
-      { title: "Tsukiji Market & Ginza Luxury", theme: "Food & Shopping", neighborhoods: ["Tsukiji", "Ginza"] },
-      { title: "Otaku Culture: Akihabara & Anime", theme: "Pop Culture", neighborhoods: ["Akihabara", "Ikebukuro"] },
-      { title: "Day Trip to Mount Fuji", theme: "Nature & Adventure", neighborhoods: ["Kawaguchi-ko", "Hakone"] }
+      { title: 'Traditional Tokyo: Temples & Gardens', theme: 'Culture & Tradition', neighborhoods: ['Asakusa', 'Ueno'] },
+      { title: 'Modern Tokyo: Shibuya & Harajuku',     theme: 'Modern Culture & Fashion', neighborhoods: ['Shibuya', 'Harajuku'] },
+      { title: 'Tsukiji Market & Ginza Luxury',        theme: 'Food & Shopping', neighborhoods: ['Tsukiji', 'Ginza'] },
+      { title: 'Otaku Culture: Akihabara & Anime',     theme: 'Pop Culture', neighborhoods: ['Akihabara', 'Ikebukuro'] },
+      { title: 'Day Trip to Mount Fuji',               theme: 'Nature & Adventure', neighborhoods: ['Kawaguchi‑ko', 'Hakone'] }
     ];
-
     const activities = [
       // Day 1: Traditional Tokyo
       [
@@ -761,44 +847,31 @@ export class TravelConcierge {
       ]
     ];
 
-    return Array.from({ length: Math.min(days, themes.length) }, (_, i) => ({
-      day: i + 1,
-      date: this.addDays(startDate, i),
-      title: themes[i].title,
-      theme: themes[i].theme,
-      activities: activities[i] || activities[0],
-      dailyBudget: `$${dailyBudget}`,
-      neighborhoods: themes[i].neighborhoods,
-      highlights: activities[i]?.map(a => a.specificPlace) || [],
-      notes: [
-        "JR Pass recommended for train travel",
-        "Bow when greeting people",
-        "Remove shoes when entering homes/temples",
-        "Cash is still king in many places",
-        "Download Google Translate with camera feature"
-      ]
-    }));
+    return Array.from({ length: days }, (_, i) => {
+      const idx = i % themes.length;
+      return {
+        day : i + 1,
+        date: this.addDays(startDate, i),
+        title       : themes[idx].title,
+        theme       : themes[idx].theme,
+        activities  : activities[idx] || activities[0],
+        dailyBudget : `$${dailyBudget}`,
+        neighborhoods: themes[idx].neighborhoods,
+        highlights  : (activities[idx] || activities[0]).map((a: any) => a.specificPlace),
+        notes       : [
+          'JR Pass recommended',
+          'Bow when greeting',
+          'Remove shoes in homes/shrines',
+          'Cash still common',
+          'Download Google Translate (camera)'
+        ]
+      };
+    });
   }
 
-  private generateBangkokItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
-    // Similar structure for Bangkok with specific places
-    return this.generateGenericDiverseItinerary("Bangkok", startDate, days, dailyBudget, []);
-  }
+  /* Bangkok / Prague / Singapore / Amsterdam now just call generic builder, so nothing else to change */
 
-  private generatePragueItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
-    // Similar structure for Prague with specific places
-    return this.generateGenericDiverseItinerary("Prague", startDate, days, dailyBudget, []);
-  }
-
-  private generateSingaporeItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
-    // Similar structure for Singapore with specific places
-    return this.generateGenericDiverseItinerary("Singapore", startDate, days, dailyBudget, []);
-  }
-
-  private generateAmsterdamItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
-    // Similar structure for Amsterdam with specific places
-    return this.generateGenericDiverseItinerary("Amsterdam", startDate, days, dailyBudget, []);
-  }
+  /* ─────────────── generic builder – unlimited days ─────────────── */
 
   private generateGenericDiverseItinerary(
     city: string,
@@ -807,74 +880,85 @@ export class TravelConcierge {
     dailyBudget: number,
     insights: any[]
   ): DaySchedule[] {
-    const themes = [
-      { title: `Historic ${city} Discovery`, theme: "History & Culture", neighborhoods: ["Old Town", "Historic District"] },
-      { title: `${city} Food & Market Adventure`, theme: "Culinary Experience", neighborhoods: ["Market District", "Food Quarter"] },
-      { title: `Art & Museums in ${city}`, theme: "Art & Culture", neighborhoods: ["Museum District", "Arts Quarter"] },
-      { title: `Local Life in ${city}`, theme: "Local Experience", neighborhoods: ["Residential Areas", "Local Markets"] },
-      { title: `Nature & Views around ${city}`, theme: "Nature & Relaxation", neighborhoods: ["Parks", "Scenic Areas"] }
+    const base = [
+      { title: `Historic ${city} Discovery`,         theme: 'History & Culture'    },
+      { title: `${city} Food & Market Adventure`,   theme: 'Culinary Experience'  },
+      { title: `Art & Museums in ${city}`,          theme: 'Art & Culture'        },
+      { title: `Local Life in ${city}`,             theme: 'Local Experience'     },
+      { title: `Nature & Scenic ${city}`,           theme: 'Nature & Relaxation'  }
     ];
 
-    return Array.from({ length: Math.min(days, 5) }, (_, i) => ({
-      day: i + 1,
-      date: this.addDays(startDate, i),
-      title: themes[i].title,
-      theme: themes[i].theme,
-      activities: [
-        {
-          time: "09:00",
-          activity: `Morning ${themes[i].theme} Experience`,
-          type: "cultural" as const,
-          specificPlace: `${city} Main Attraction`,
-          address: `Central ${city}`,
-          description: `Explore the best of ${city}'s ${themes[i].theme.toLowerCase()}`,
-          duration: "2.5 hours",
-          cost: "$25",
-          tips: ["Arrive early", "Bring camera", "Comfortable shoes recommended"]
-        },
-        {
-          time: "12:30",
-          activity: `Local ${city} Lunch`,
-          type: "dining" as const,
-          specificPlace: `Traditional ${city} Restaurant`,
-          address: `${themes[i].neighborhoods[0]}`,
-          description: `Authentic local cuisine in the heart of ${city}`,
-          duration: "1.5 hours",
-          cost: "$35",
-          tips: ["Try local specialties", "Ask for recommendations"]
-        },
-        {
-          time: "15:00",
-          activity: `Afternoon ${city} Exploration`,
-          type: "sightseeing" as const,
-          specificPlace: `${city} Hidden Gem`,
-          address: `${themes[i].neighborhoods[1]}`,
-          description: `Discover lesser-known attractions and local favorites`,
-          duration: "2 hours",
-          cost: "$15",
-          tips: ["Explore on foot", "Talk to locals", "Take your time"]
-        },
-        {
-          time: "18:30",
-          activity: `Evening ${city} Experience`,
-          type: "leisure" as const,
-          specificPlace: `${city} Evening Spot`,
-          address: `City Center`,
-          description: `End the day with a memorable ${city} experience`,
-          duration: "2 hours",
-          cost: "$30",
-          tips: ["Perfect for sunset", "Bring layers", "Great photo opportunities"]
-        }
-      ],
-      dailyBudget: `$${dailyBudget}`,
-      neighborhoods: themes[i].neighborhoods,
-      highlights: [`${city} Main Attraction`, `Traditional ${city} Restaurant`, `${city} Hidden Gem`],
-      notes: [
-        `Each day explores different aspects of ${city}`,
-        "Comfortable walking shoes essential",
-        "Try local transportation",
-        "Learn basic local phrases"
-      ]
-    }));
+    return Array.from({ length: days }, (_, i) => {
+      const tpl = base[i % base.length];
+      return {
+        day : i + 1,
+        date: this.addDays(startDate, i),
+        title: tpl.title,
+        theme: tpl.theme,
+        activities: this.buildGenericActivities(city, tpl.theme),
+        dailyBudget: `$${dailyBudget}`,
+        neighborhoods: [],
+        highlights: [],
+        notes: [`Auto‑generated day ${i + 1}`]
+      };
+    });
   }
+
+  private buildGenericActivities(city: string, theme: string): Activity[] {
+    return [
+      {
+        time: '09:00',
+        activity: `${theme} Morning Walk`,
+        type: 'sightseeing',
+        specificPlace: `${city} Center`,
+        address: city,
+        description: `A relaxed ${theme.toLowerCase()} walk to start the day`,
+        duration: '2h',
+        cost: 'Free',
+        tips: ['Bring water', 'Wear comfy shoes']
+      },
+      {
+        time: '12:30',
+        activity: 'Local Lunch',
+        type: 'dining',
+        specificPlace: `Typical ${city} Eatery`,
+        address: city,
+        description: 'Try a signature local dish',
+        duration: '1.5h',
+        cost: '$20‑30',
+        tips: ['Ask for today’s special']
+      },
+      {
+        time: '15:00',
+        activity: `${theme} Afternoon`,
+        type: 'leisure',
+        specificPlace: `${city} Highlight`,
+        address: city,
+        description: 'Continue exploring with a focus on local vibes',
+        duration: '3h',
+        cost: '$10‑40'
+      },
+      {
+        time: '19:00',
+        activity: 'Evening at leisure',
+        type: 'leisure',
+        specificPlace: 'User’s choice',
+        address: city,
+        description: 'Flexible time – dinner, show, or night walk',
+        duration: 'open',
+        cost: 'Varies'
+      }
+    ];
+  }
+
+  /* Bangkok / Prague / Singapore / Amsterdam just map to the generic builder */
+
+  private generateBangkokItinerary(start: string, d: number, b: number)   { return this.generateGenericDiverseItinerary('Bangkok',   start, d, b, []); }
+  private generatePragueItinerary(start: string, d: number, b: number)    { return this.generateGenericDiverseItinerary('Prague',    start, d, b, []); }
+  private generateSingaporeItinerary(start: string, d: number, b: number) { return this.generateGenericDiverseItinerary('Singapore', start, d, b, []); }
+  private generateAmsterdamItinerary(start: string, d: number, b: number) { return this.generateGenericDiverseItinerary('Amsterdam', start, d, b, []); }
+  private generateSeoulItinerary(start: string, d: number, b: number): DaySchedule[] {
+    return this.generateGenericDiverseItinerary('Seoul', start, d, b, []);
+  }
+
 }

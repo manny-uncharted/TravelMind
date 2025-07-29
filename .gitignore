@@ -5,9 +5,12 @@
 /.pnp
 .pnp.js
 .vscode/
+screenshots/
 
 # testing
 /coverage
+NOTES
+*.rdb
 
 # next.js
 /.next/

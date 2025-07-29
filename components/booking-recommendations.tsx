@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,10 +20,12 @@ import {
   Wifi,
   Coffee,
   Dumbbell,
-  Car as CarIcon
+  Car as CarIcon,
+  Loader2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { FlightBooking } from './flight-booking';
+import { toast } from 'sonner';
 
 interface BookingRecommendationsProps {
   destination: string;
@@ -33,119 +35,159 @@ interface BookingRecommendationsProps {
   origin?: string;
 }
 
-export function BookingRecommendations({ destination, dates, travelers, budget, origin = 'New York' }: BookingRecommendationsProps) {
-  const [activeTab, setActiveTab] = useState('flights');
+interface BookingItem {
+  name: string;
+  link: string;
+  blurb: string;
+  category: string;
+  city: string;
+  rating?: number;
+  price?: string;
+  [key: string]: any;
+}
 
-  // Mock booking data - in production, this would come from real APIs
-  const bookingData = {
-    hotels: [
+export function BookingRecommendations({ destination, dates, travelers, budget, origin = 'Your Location' }: BookingRecommendationsProps) {
+  const [activeTab, setActiveTab] = useState('flights');
+  const [bookingData, setBookingData] = useState<{
+    hotels: BookingItem[];
+    restaurants: BookingItem[];
+    activities: BookingItem[];
+    flights: any[];
+    loading: boolean;
+  }>({
+    hotels: [],
+    restaurants: [],
+    activities: [],
+    flights: [],
+    loading: true
+  });
+
+  useEffect(() => {
+    if (destination) {
+      fetchBookingData();
+    }
+  }, [destination, dates, budget]);
+
+  const fetchBookingData = async () => {
+    setBookingData(prev => ({ ...prev, loading: true }));
+    
+    try {
+      // Make separate, specific searches for each category
+      const [hotelsResponse, restaurantsResponse, activitiesResponse, flightsResponse] = await Promise.allSettled([
+        fetch('/api/booking-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            destination,
+            type: 'hotel',
+            budget,
+            dates
+          })
+        }),
+        fetch('/api/booking-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            destination,
+            type: 'restaurant',
+            budget,
+            dates
+          })
+        }),
+        fetch('/api/booking-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            destination,
+            type: 'activity',
+            budget,
+            dates
+          })
+        }),
+        fetch(`/api/booking-search?origin=${encodeURIComponent(origin)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            destination,
+            type: 'flight',
+            budget,
+            dates,
+            origin
+          })
+        })
+      ]);
+
+      const hotels = hotelsResponse.status === 'fulfilled' && hotelsResponse.value.ok 
+        ? await hotelsResponse.value.json() 
+        : { results: [] };
+      
+      const restaurants = restaurantsResponse.status === 'fulfilled' && restaurantsResponse.value.ok 
+        ? await restaurantsResponse.value.json() 
+        : { results: [] };
+      
+      const activities = activitiesResponse.status === 'fulfilled' && activitiesResponse.value.ok 
+        ? await activitiesResponse.value.json() 
+        : { results: [] };
+
+      const flights = flightsResponse.status === 'fulfilled' && flightsResponse.value.ok 
+        ? await flightsResponse.value.json() 
+        : { results: [] };
+
+      // Fallback to generated flight options if API fails
+      const flightOptions = flights.results?.length > 0 
+        ? flights.results 
+        : generateFlightOptions(origin, destination, dates);
+
+      setBookingData({
+        hotels: hotels.results || [],
+        restaurants: restaurants.results || [],
+        activities: activities.results || [],
+        flights: flightOptions,
+        loading: false
+      });
+
+    } catch (error) {
+      console.error('Error fetching booking data:', error);
+      setBookingData(prev => ({ ...prev, loading: false }));
+      toast.error('Failed to load booking recommendations');
+    }
+  };
+
+  const generateFlightOptions = (origin: string, destination: string, dates: { start: string; end: string }) => {
+    const destinationCity = destination.split(',')[0];
+    const originCity = origin || 'Your Location';
+    
+    return [
       {
-        id: '1',
-        name: `Grand ${destination} Hotel`,
-        rating: 4.8,
-        price: '$320/night',
-        image: 'https://images.pexels.com/photos/258154/pexels-photo-258154.jpeg?auto=compress&cs=tinysrgb&w=400',
-        location: `${destination} City Center`,
-        amenities: ['Free WiFi', 'Spa', 'Gym', 'Restaurant'],
-        bookingUrl: 'https://booking.com',
-        description: `Luxury hotel in the heart of ${destination} with stunning city views.`,
-        availability: 'Available for your dates'
+        type: 'Round-trip',
+        departure: originCity,
+        arrival: destinationCity,
+        departureDate: dates.start,
+        returnDate: dates.end,
+        bookingLink: `https://www.skyscanner.com/routes/${originCity.toLowerCase().replace(/\s+/g, '-')}/${destinationCity.toLowerCase().replace(/\s+/g, '-')}`,
+        estimatedPrice: getBudgetRange(budget, 'flight'),
+        provider: 'Skyscanner'
       },
       {
-        id: '2',
-        name: `${destination} Bay Resort`,
-        rating: 4.6,
-        price: '$280/night',
-        image: 'https://images.pexels.com/photos/271624/pexels-photo-271624.jpeg?auto=compress&cs=tinysrgb&w=400',
-        location: `${destination} Waterfront`,
-        amenities: ['Ocean View', 'Pool', 'Free WiFi', 'Breakfast'],
-        bookingUrl: 'https://booking.com',
-        description: `Waterfront resort with panoramic views and modern amenities in ${destination}.`,
-        availability: 'Limited availability'
-      },
-      {
-        id: '3',
-        name: `${destination} Boutique Hotel`,
-        rating: 4.2,
-        price: '$180/night',
-        image: 'https://images.pexels.com/photos/271639/pexels-photo-271639.jpeg?auto=compress&cs=tinysrgb&w=400',
-        location: `${destination} Historic District`,
-        amenities: ['Free WiFi', 'Rooftop Bar', 'Concierge', 'Parking'],
-        bookingUrl: 'https://booking.com',
-        description: `Charming boutique hotel in the historic heart of ${destination}.`,
-        availability: 'Available for your dates'
+        type: 'Alternative',
+        departure: originCity,
+        arrival: destinationCity,
+        departureDate: dates.start,
+        returnDate: dates.end,
+        bookingLink: `https://www.kayak.com/flights/${originCity}-${destinationCity}/${dates.start}${dates.end ? '/' + dates.end : ''}`,
+        estimatedPrice: getBudgetRange(budget, 'flight'),
+        provider: 'Kayak'
       }
-    ],
-    restaurants: [
-      {
-        id: '1',
-        name: `${destination} Fine Dining`,
-        rating: 4.9,
-        price: '$$$$$',
-        cuisine: 'Local Specialty',
-        location: `${destination} Downtown`,
-        reservationUrl: 'https://opentable.com',
-        description: `World-renowned restaurant showcasing the best of ${destination} cuisine.`,
-        bookingAdvance: '2 weeks',
-        specialties: ['Signature Dishes', 'Wine Pairing', 'Chef\'s Table']
-      },
-      {
-        id: '2',
-        name: `Local ${destination} Bistro`,
-        rating: 4.5,
-        price: '$$',
-        cuisine: 'Traditional',
-        location: `${destination} Old Town`,
-        reservationUrl: 'https://opentable.com',
-        description: `Authentic local dining experience in traditional ${destination} setting.`,
-        bookingAdvance: 'Walk-in friendly',
-        specialties: ['Local Favorites', 'Traditional Recipes', 'Craft Beer']
-      },
-      {
-        id: '3',
-        name: `${destination} Market Kitchen`,
-        rating: 4.7,
-        price: '$$$',
-        cuisine: 'Farm-to-Table',
-        location: `${destination} Market District`,
-        reservationUrl: 'https://opentable.com',
-        description: `Fresh, seasonal cuisine using local ingredients from ${destination}.`,
-        bookingAdvance: '1 week',
-        specialties: ['Seasonal Menu', 'Local Ingredients', 'Vegetarian Options']
-      }
-    ],
-    activities: [
-      {
-        id: '1',
-        name: `${destination} City Tour`,
-        rating: 4.6,
-        price: '$45',
-        duration: '3 hours',
-        bookingUrl: 'https://viator.com',
-        description: `Comprehensive guided tour of ${destination}'s main attractions and hidden gems.`,
-        includes: ['Professional guide', 'Transportation', 'Entry fees']
-      },
-      {
-        id: '2',
-        name: `${destination} Food Experience`,
-        rating: 4.8,
-        price: '$85',
-        duration: '4 hours',
-        bookingUrl: 'https://viator.com',
-        description: `Culinary journey through ${destination}'s best local food scene.`,
-        includes: ['Food tastings', 'Local guide', 'Market visit']
-      },
-      {
-        id: '3',
-        name: `${destination} Cultural Workshop`,
-        rating: 4.7,
-        price: '$65',
-        duration: '2.5 hours',
-        bookingUrl: 'https://viator.com',
-        description: `Hands-on cultural experience learning traditional ${destination} crafts.`,
-        includes: ['All materials', 'Expert instruction', 'Take-home creation']
-      }
-    ]
+    ];
+  };
+
+  const getBudgetRange = (budget: string, type: string) => {
+    const ranges = {
+      budget: { hotel: '$50-80/night', restaurant: '$15-25/meal', flight: '$300-500', activity: '$15-35' },
+      mid: { hotel: '$80-150/night', restaurant: '$25-50/meal', flight: '$500-800', activity: '$35-65' },
+      luxury: { hotel: '$150-300/night', restaurant: '$50-100/meal', flight: '$800-1500+', activity: '$65-150+' }
+    };
+    return ranges[budget as keyof typeof ranges]?.[type as keyof typeof ranges.budget] || 'Price varies';
   };
 
   const getAmenityIcon = (amenity: string) => {
@@ -163,15 +205,34 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
     return <IconComponent className="w-3 h-3" />;
   };
 
+  if (bookingData.loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ExternalLink className="w-5 h-5 text-blue-600" />
+            Loading Booking Options...
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-12">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <span>Finding the best options for {destination}...</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ExternalLink className="w-5 h-5 text-blue-600" />
-          Complete Booking Suite
+          Booking Options for {destination}
         </CardTitle>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Everything you need for your trip to {destination}
+          Real booking links and recommendations for your trip
         </p>
       </CardHeader>
       
@@ -197,56 +258,94 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
           </TabsList>
 
           <TabsContent value="flights" className="mt-4">
-            <FlightBooking
-              origin={origin}
-              destination={destination}
-              dates={dates}
-              travelers={travelers}
-              budget={budget}
-            />
+            <div className="space-y-4">
+              {bookingData.flights.map((flight, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Card className="hover:shadow-lg transition-shadow">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-semibold text-lg">{flight.type} Flight</h4>
+                          <p className="text-sm text-gray-600">{flight.departure} → {flight.arrival}</p>
+                          <div className="flex items-center gap-4 mt-2 text-sm">
+                            <span>📅 {flight.departureDate}</span>
+                            {flight.returnDate && <span>↩️ {flight.returnDate}</span>}
+                          </div>
+                        </div>
+                        <Badge variant="outline">{flight.provider}</Badge>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-blue-600">{flight.estimatedPrice}</p>
+                          <p className="text-xs text-gray-500">Estimated price range</p>
+                        </div>
+                        <Button asChild>
+                          <a href={flight.bookingLink} target="_blank" rel="noopener noreferrer">
+                            Search Flights
+                            <ExternalLink className="w-3 h-3 ml-1" />
+                          </a>
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
           </TabsContent>
 
           <TabsContent value="hotels" className="mt-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {bookingData.hotels.map((hotel, index) => (
                 <motion.div
-                  key={hotel.id}
+                  key={index}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                 >
                   <Card className="h-full hover:shadow-lg transition-shadow">
-                    <div className="aspect-video bg-gray-200 rounded-t-lg overflow-hidden">
-                      <img 
-                        src={hotel.image} 
-                        alt={hotel.name}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
+                    {hotel.image && (
+                      <div className="aspect-video bg-gray-200 rounded-t-lg overflow-hidden">
+                        <img 
+                          src={hotel.image} 
+                          alt={hotel.name}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between mb-2">
                         <h4 className="font-semibold text-sm">{hotel.name}</h4>
-                        <div className="flex items-center gap-1">
-                          <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                          <span className="text-xs">{hotel.rating}</span>
-                        </div>
+                        {hotel.rating && (
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                            <span className="text-xs">{hotel.rating}</span>
+                          </div>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-1 mb-2">
                         <MapPin className="w-3 h-3 text-gray-500" />
-                        <span className="text-xs text-gray-600">{hotel.location}</span>
+                        <span className="text-xs text-gray-600">{hotel.location || destination}</span>
                       </div>
                       
-                      <p className="text-xs text-gray-600 mb-3">{hotel.description}</p>
+                      <p className="text-xs text-gray-600 mb-3">{hotel.blurb}</p>
                       
-                      <div className="flex flex-wrap gap-1 mb-3">
-                        {hotel.amenities.map((amenity, i) => (
-                          <Badge key={i} variant="outline" className="text-xs flex items-center gap-1">
-                            {getAmenityIcon(amenity)}
-                            {amenity}
-                          </Badge>
-                        ))}
-                      </div>
+                      {hotel.amenities && (
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {hotel.amenities.slice(0, 3).map((amenity: string, i: number) => (
+                            <Badge key={i} variant="outline" className="text-xs flex items-center gap-1">
+                              {getAmenityIcon(amenity)}
+                              {amenity}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                       
                       <div className="flex items-center justify-between">
                         <div>
@@ -254,7 +353,7 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
                           <p className="text-xs text-green-600">{hotel.availability}</p>
                         </div>
                         <Button size="sm" asChild>
-                          <a href={hotel.bookingUrl} target="_blank" rel="noopener noreferrer">
+                          <a href={hotel.link} target="_blank" rel="noopener noreferrer">
                             Book Now
                             <ExternalLink className="w-3 h-3 ml-1" />
                           </a>
@@ -271,7 +370,7 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
             <div className="space-y-4">
               {bookingData.restaurants.map((restaurant, index) => (
                 <motion.div
-                  key={restaurant.id}
+                  key={index}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.1 }}
@@ -282,36 +381,42 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
                         <div>
                           <h4 className="font-semibold">{restaurant.name}</h4>
                           <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="outline">{restaurant.cuisine}</Badge>
-                            <div className="flex items-center gap-1">
-                              <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                              <span className="text-sm">{restaurant.rating}</span>
-                            </div>
+                            {restaurant.cuisine && <Badge variant="outline">{restaurant.cuisine}</Badge>}
+                            {restaurant.rating && (
+                              <div className="flex items-center gap-1">
+                                <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                                <span className="text-sm">{restaurant.rating}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="text-right">
                           <p className="font-semibold text-blue-600">{restaurant.price}</p>
-                          <p className="text-xs text-gray-600">{restaurant.bookingAdvance}</p>
+                          {restaurant.bookingAdvance && (
+                            <p className="text-xs text-gray-600">{restaurant.bookingAdvance}</p>
+                          )}
                         </div>
                       </div>
                       
                       <div className="flex items-center gap-1 mb-2">
                         <MapPin className="w-3 h-3 text-gray-500" />
-                        <span className="text-sm text-gray-600">{restaurant.location}</span>
+                        <span className="text-sm text-gray-600">{restaurant.location || destination}</span>
                       </div>
                       
-                      <p className="text-sm text-gray-600 mb-3">{restaurant.description}</p>
+                      <p className="text-sm text-gray-600 mb-3">{restaurant.blurb}</p>
                       
-                      <div className="flex flex-wrap gap-1 mb-3">
-                        {restaurant.specialties.map((specialty, i) => (
-                          <Badge key={i} variant="secondary" className="text-xs">
-                            {specialty}
-                          </Badge>
-                        ))}
-                      </div>
+                      {restaurant.specialties && (
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {restaurant.specialties.map((specialty: string, i: number) => (
+                            <Badge key={i} variant="secondary" className="text-xs">
+                              {specialty}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                       
                       <Button size="sm" asChild>
-                        <a href={restaurant.reservationUrl} target="_blank" rel="noopener noreferrer">
+                        <a href={restaurant.link} target="_blank" rel="noopener noreferrer">
                           Make Reservation
                           <ExternalLink className="w-3 h-3 ml-1" />
                         </a>
@@ -327,7 +432,7 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {bookingData.activities.map((activity, index) => (
                 <motion.div
-                  key={activity.id}
+                  key={index}
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.1 }}
@@ -336,34 +441,42 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between mb-2">
                         <h4 className="font-semibold">{activity.name}</h4>
-                        <div className="flex items-center gap-1">
-                          <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                          <span className="text-sm">{activity.rating}</span>
-                        </div>
+                        {activity.rating && (
+                          <div className="flex items-center gap-1">
+                            <Star className="w-3 h-3 text-yellow-500 fill-current" />
+                            <span className="text-sm">{activity.rating}</span>
+                          </div>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-4 mb-3 text-sm">
-                        <div className="flex items-center gap-1">
-                          <DollarSign className="w-3 h-3 text-gray-500" />
-                          <span>{activity.price}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-gray-500" />
-                          <span>{activity.duration}</span>
-                        </div>
+                        {activity.price && (
+                          <div className="flex items-center gap-1">
+                            <DollarSign className="w-3 h-3 text-gray-500" />
+                            <span>{activity.price}</span>
+                          </div>
+                        )}
+                        {activity.duration && (
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-gray-500" />
+                            <span>{activity.duration}</span>
+                          </div>
+                        )}
                       </div>
                       
-                      <p className="text-sm text-gray-600 mb-3">{activity.description}</p>
+                      <p className="text-sm text-gray-600 mb-3">{activity.blurb}</p>
                       
-                      <div className="space-y-1 mb-3">
-                        <p className="text-xs font-medium text-gray-700">Includes:</p>
-                        {activity.includes.map((item, i) => (
-                          <p key={i} className="text-xs text-gray-600">• {item}</p>
-                        ))}
-                      </div>
+                      {activity.includes && (
+                        <div className="space-y-1 mb-3">
+                          <p className="text-xs font-medium text-gray-700">Includes:</p>
+                          {activity.includes.map((item: string, i: number) => (
+                            <p key={i} className="text-xs text-gray-600">• {item}</p>
+                          ))}
+                        </div>
+                      )}
                       
                       <Button size="sm" asChild>
-                        <a href={activity.bookingUrl} target="_blank" rel="noopener noreferrer">
+                        <a href={activity.link} target="_blank" rel="noopener noreferrer">
                           Book Activity
                           <ExternalLink className="w-3 h-3 ml-1" />
                         </a>

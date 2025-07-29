@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { CACHE_KEYS, CacheKeyHelpers } from './utils/cache-keys';
 
 // Redis client configuration for external instance
 // Prioritize REDIS_URL if available, otherwise use host, port, and password.
@@ -31,15 +32,7 @@ redis.on("close", () => {
   console.log("❌ Redis connection closed");
 });
 
-export { redis };
-
-// Cache keys for various data types to ensure consistent key naming.
-export const CACHE_KEYS = {
-  TRAVEL_PLAN: (id: string) => `travel_plan:${id}`,
-  USER_HISTORY: (userId: string) => `user_history:${userId}`,
-  BACKGROUND_JOB: (jobId: string) => `job:${jobId}`,
-  CHAT_HISTORY: (planId: string) => `chat:${planId}`,
-};
+export { redis, CACHE_KEYS, CacheKeyHelpers };
 
 /**
  * CacheManager class provides static utility methods for interacting with Redis.

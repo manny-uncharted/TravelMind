@@ -47,6 +47,7 @@ import { BookingRecommendations } from '@/components/booking-recommendations';
 import { TravelHistory } from '@/components/travel-history';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { DestinationSelector } from '@/components/destination-selector';
+import { CacheKeyHelpers } from '@/lib/utils/cache-keys';
 
 interface TravelPreferences {
   destination: string;
@@ -321,9 +322,47 @@ export function TravelPlanningInterface() {
   };
 
   const handlePlanUpdate = (updatedPlan: any) => {
+    console.log('🔄 handlePlanUpdate called with:', updatedPlan);
     setWorkflowData(updatedPlan);
     setItinerary(updatedPlan.itinerary);
     setRecommendations(updatedPlan.recommendations || []);
+    
+    // Auto-switch to itinerary tab to show changes
+    console.log('🔄 Switching to itinerary tab...');
+    setTimeout(() => {
+      setActiveTab('itinerary');
+      console.log('🔄 Tab switched to itinerary');
+    }, 500);
+    
+    toast.success('Itinerary updated! Switching to Itinerary tab...');
+  };
+
+  const handleCitySwitch = async (city: string) => {
+    if (city === preferences.destination) return;      // already selected
+    toast.info(`Loading itinerary for ${city}…`);
+    setIsProcessing(true);
+
+    try {
+      // Quick synchronous endpoint
+      const res = await fetch(`/api/quick-plan?city=${encodeURIComponent(city)}`);
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+
+      // update local state
+      setPreferences(prev => ({ ...prev, destination: city }));
+      setRecommendations(data.recommendations || []);
+      setItinerary(data.itinerary);
+      setWorkflowData(data.workflow_data);
+      setOrchestrationData(data.workflow_data?.orchestration ?? null);
+
+      toast.success(`Switched to ${city}`);
+    } catch (err:any) {
+      console.error(err);
+      toast.error('Failed to load new city', { description: err.message });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -680,19 +719,26 @@ export function TravelPlanningInterface() {
                   </TabsList>
                   
                   <TabsContent value="itinerary">
-                    <ItineraryPreview 
+                    <ItineraryPreview
                       preferences={preferences}
                       recommendations={recommendations}
                       itinerary={itinerary}
                       workflowData={workflowData}
+                      /* THE ONLY NEW PROP ↓↓↓ */
+                      onSelectCity={handleCitySwitch}
                     />
                   </TabsContent>
                   
                   <TabsContent value="chat">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <ChatInterface
-                        planId={jobId || 'current'}
-                        initialData={workflowData}
+                        planId={CacheKeyHelpers.generateTravelPlanKey(preferences)}
+                        initialData={{
+                          itinerary: itinerary,
+                          recommendations: recommendations,
+                          workflow_data: workflowData,
+                          orchestration: orchestrationData
+                        }}
                         onPlanUpdate={handlePlanUpdate}
                       />
                       <div className="space-y-4">
