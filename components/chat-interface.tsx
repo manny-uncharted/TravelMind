@@ -67,7 +67,7 @@ I can help you in two ways:
 What would you like to know or change?`,
       timestamp: Date.now(),
       suggestions: [
-        '❓ What activities are planned for each day?',
+        '? What activities are planned for each day?',
         '💰 What\'s the total budget breakdown?',
         '🍽️ Add more restaurant recommendations',
         '🏛️ Include more cultural experiences',
