@@ -22,7 +22,7 @@ export class BookingCurator {
   async curate(city: string, budget: string, interests: string): Promise<BookingCuratorOutput> {
     const queries: { q: string; type: 'hotel' | 'restaurant' | 'activity' }[] = [
       { q: `${city} best hotels ${budget} 2025`, type: 'hotel'  },
-      { q: `${city} must‑try restaurants ${budget} foodie`, type: 'restaurant' },
+      { q: `${city} must-try restaurants ${budget} foodie`, type: 'restaurant' },
       { q: `${city} top activities ${interests} 2025`,       type: 'activity'  }
     ];
 
