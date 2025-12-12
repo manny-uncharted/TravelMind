@@ -48,7 +48,7 @@ export function ItineraryPreview({
   workflowData,
   onSelectCity
 }: ItineraryPreviewProps) {
-  logger.info('ItineraryPreview component initialized', {
+  console.debug('ItineraryPreview component initialized', {
     hasPreferences: !!preferences,
     hasItinerary: !!itinerary,
     hasWorkflowData: !!workflowData,

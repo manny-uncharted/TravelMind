@@ -33,6 +33,7 @@ interface BookingRecommendationsProps {
   travelers: string;
   budget: string;
   origin?: string;
+  refreshKey?: number; // increment to force refresh after chat modifications
 }
 
 interface BookingItem {
@@ -46,7 +47,7 @@ interface BookingItem {
   [key: string]: any;
 }
 
-export function BookingRecommendations({ destination, dates, travelers, budget, origin = 'Your Location' }: BookingRecommendationsProps) {
+export function BookingRecommendations({ destination, dates, travelers, budget, origin = 'Your Location', refreshKey = 0 }: BookingRecommendationsProps) {
   const [activeTab, setActiveTab] = useState('flights');
   const [bookingData, setBookingData] = useState<{
     hotels: BookingItem[];
@@ -66,7 +67,7 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
     if (destination) {
       fetchBookingData();
     }
-  }, [destination, dates, budget]);
+  }, [destination, dates, budget, refreshKey]);
 
   const fetchBookingData = async () => {
     setBookingData(prev => ({ ...prev, loading: true }));
@@ -207,17 +208,46 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
 
   if (bookingData.loading) {
     return (
-      <Card>
-        <CardHeader>
+      <Card className="overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50">
           <CardTitle className="flex items-center gap-2">
-            <ExternalLink className="w-5 h-5 text-blue-600" />
+            <ExternalLink className="w-5 h-5 text-blue-600 animate-pulse" />
             Loading Booking Options...
           </CardTitle>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Searching for the best options in {destination}
+          </p>
         </CardHeader>
-        <CardContent className="flex items-center justify-center py-12">
-          <div className="flex items-center gap-2">
-            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-            <span>Finding the best options for {destination}...</span>
+        <CardContent className="py-8">
+          <div className="space-y-6">
+            {/* Skeleton tabs */}
+            <div className="flex gap-2 border-b pb-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-9 w-24 bg-gray-200 dark:bg-gray-700 rounded-md animate-pulse" />
+              ))}
+            </div>
+            {/* Skeleton cards */}
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="p-4 border rounded-lg space-y-3" style={{ animationDelay: `${i * 150}ms` }}>
+                <div className="flex justify-between items-start">
+                  <div className="space-y-2 flex-1">
+                    <div className="h-5 w-48 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+                    <div className="h-4 w-64 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
+                  </div>
+                  <div className="h-8 w-24 bg-blue-100 dark:bg-blue-900/50 rounded animate-pulse" />
+                </div>
+                <div className="flex gap-2">
+                  {[1, 2, 3].map((j) => (
+                    <div key={j} className="h-5 w-16 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {/* Loading indicator */}
+            <div className="flex items-center justify-center gap-2 text-blue-600">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm">Fetching live booking data...</span>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -282,8 +312,17 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
                       
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-semibold text-blue-600">{flight.estimatedPrice}</p>
-                          <p className="text-xs text-gray-500">Estimated price range</p>
+                          {flight.estimatedPrice ? (
+                            <>
+                              <p className="font-semibold text-blue-600">{flight.estimatedPrice}</p>
+                              <p className="text-xs text-gray-500">Estimated price range</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="font-semibold text-blue-600">Compare live prices</p>
+                              <p className="text-xs text-gray-500">Opens a real search</p>
+                            </>
+                          )}
                         </div>
                         <Button asChild>
                           <a href={flight.bookingLink} target="_blank" rel="noopener noreferrer">
@@ -349,8 +388,8 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
                       
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-semibold text-blue-600">{hotel.price}</p>
-                          <p className="text-xs text-green-600">{hotel.availability}</p>
+                          {hotel.price && <p className="font-semibold text-blue-600">{hotel.price}</p>}
+                          {hotel.availability && <p className="text-xs text-green-600">{hotel.availability}</p>}
                         </div>
                         <Button size="sm" asChild>
                           <a href={hotel.link} target="_blank" rel="noopener noreferrer">
@@ -391,7 +430,9 @@ export function BookingRecommendations({ destination, dates, travelers, budget, 
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-semibold text-blue-600">{restaurant.price}</p>
+                          {restaurant.price && (
+                            <p className="font-semibold text-blue-600">{restaurant.price}</p>
+                          )}
                           {restaurant.bookingAdvance && (
                             <p className="text-xs text-gray-600">{restaurant.bookingAdvance}</p>
                           )}

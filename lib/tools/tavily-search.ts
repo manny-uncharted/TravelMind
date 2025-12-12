@@ -12,6 +12,18 @@ export interface TavilySearchResponse {
   response_time: number;
 }
 
+class TavilyError extends Error {
+  status?: number;
+  requestId?: string;
+
+  constructor(message: string, opts?: { status?: number; requestId?: string }) {
+    super(message);
+    this.name = 'TavilyError';
+    this.status = opts?.status;
+    this.requestId = opts?.requestId;
+  }
+}
+
 export class TavilySearchTool {
   private apiKey: string;
   private baseUrl: string;
@@ -25,11 +37,16 @@ export class TavilySearchTool {
     query: string,
     options: {
       search_depth?: 'basic' | 'advanced';
-      topic?: 'general' | 'news';
+      topic?: 'general' | 'news' | 'finance';
       days?: number;
       max_results?: number;
       include_domains?: string[];
       exclude_domains?: string[];
+      include_answer?: boolean;
+      include_raw_content?: boolean | 'markdown' | 'text';
+      include_images?: boolean;
+      include_image_descriptions?: boolean;
+      include_favicon?: boolean;
     } = {}
   ): Promise<TavilySearchResponse> {
     const {
@@ -38,63 +55,84 @@ export class TavilySearchTool {
       days = 3,
       max_results = 10,
       include_domains = [],
-      exclude_domains = []
+      exclude_domains = [],
+      include_answer = false,
+      include_raw_content = false,
+      include_images = false,
+      include_image_descriptions = false,
+      include_favicon = false
     } = options;
 
+    if (!this.apiKey) {
+      throw new TavilyError('Missing TAVILY_API_KEY. Tavily is required for web search.');
+    }
+
     try {
-      // In a real implementation, this would make an API call to Tavily
-      // For now, return mock search results
-      return this.getMockSearchResults(query, max_results);
+      const time_range = this.daysToTimeRange(days);
+      const requestBody: Record<string, any> = {
+        query,
+        search_depth,
+        topic,
+        max_results,
+        include_answer,
+        include_raw_content,
+        include_images,
+        include_image_descriptions,
+        include_favicon,
+        ...(time_range ? { time_range } : {}),
+        ...(include_domains.length > 0 ? { include_domains } : {}),
+        ...(exclude_domains.length > 0 ? { exclude_domains } : {}),
+      };
+
+      const response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        const reqId = response.headers.get('x-request-id') || undefined;
+        throw new TavilyError(
+          `Tavily search failed (${response.status}). ${errorText}`.trim(),
+          { status: response.status, requestId: reqId }
+        );
+      }
+
+      const data = await response.json();
+      
+      const rt = typeof data.response_time === 'string'
+        ? Number.parseFloat(data.response_time)
+        : (typeof data.response_time === 'number' ? data.response_time : 0);
+
+      return {
+        results: (data.results || []).map((r: any) => ({
+          title: r.title || '',
+          url: r.url || '',
+          content: r.content || '',
+          score: r.score || 0,
+          published_date: r.published_date
+        })),
+        query: data.query || query,
+        response_time: Number.isFinite(rt) ? rt : 0
+      };
+      
     } catch (error) {
-      console.error('Tavily search error:', error);
-      return this.getMockSearchResults(query, max_results);
+      // No mock fallbacks in production-grade mode.
+      if (error instanceof TavilyError) throw error;
+      throw new TavilyError(`Tavily search error: ${(error as Error)?.message || String(error)}`);
     }
   }
 
-  private getMockSearchResults(query: string, maxResults: number): TavilySearchResponse {
-    const mockResults: TavilySearchResult[] = [
-      {
-        title: "Best Travel Destinations 2024 - Complete Guide",
-        url: "https://example.com/travel-guide",
-        content: "Comprehensive guide to the best travel destinations for 2024, including budget tips and insider recommendations.",
-        score: 0.95,
-        published_date: "2024-01-15"
-      },
-      {
-        title: "Local Travel Tips and Hidden Gems",
-        url: "https://example.com/local-tips",
-        content: "Discover hidden gems and local favorites that most tourists miss. Expert recommendations from local guides.",
-        score: 0.88,
-        published_date: "2024-01-10"
-      },
-      {
-        title: "Budget Travel Planning - Expert Tips",
-        url: "https://example.com/budget-travel",
-        content: "How to plan amazing trips on any budget. Includes cost breakdowns and money-saving strategies.",
-        score: 0.82,
-        published_date: "2024-01-05"
-      },
-      {
-        title: "Cultural Experiences and Local Events",
-        url: "https://example.com/cultural-events",
-        content: "Upcoming cultural events, festivals, and authentic local experiences. Updated daily with new events.",
-        score: 0.78,
-        published_date: "2024-01-20"
-      },
-      {
-        title: "Transportation and Logistics Guide",
-        url: "https://example.com/transportation",
-        content: "Complete guide to getting around, including public transport, ride-sharing, and local transportation tips.",
-        score: 0.75,
-        published_date: "2024-01-12"
-      }
-    ];
-
-    return {
-      results: mockResults.slice(0, maxResults),
-      query,
-      response_time: 0.45
-    };
+  private daysToTimeRange(days?: number): 'day' | 'week' | 'month' | 'year' | undefined {
+    if (!days || days <= 0) return undefined;
+    if (days <= 1) return 'day';
+    if (days <= 7) return 'week';
+    if (days <= 31) return 'month';
+    return 'year';
   }
 
   async searchDestinations(destination: string, interests: string): Promise<TavilySearchResponse> {
@@ -122,6 +160,106 @@ export class TavilySearchTool {
     return this.search(query, {
       search_depth: 'advanced',
       max_results: 6
+    });
+  }
+
+  /**
+   * Search social media and creator content (TikTok, Instagram, YouTube, Reddit)
+   * for authentic travel recommendations and hidden gems
+   */
+  async searchSocialMedia(destination: string, topic: string = ''): Promise<TavilySearchResponse> {
+    const query = `${destination} ${topic} travel tips hidden gems locals recommend site:tiktok.com OR site:reddit.com/r/travel OR site:youtube.com OR site:instagram.com`;
+    return this.search(query, {
+      search_depth: 'advanced',
+      topic: 'general',
+      max_results: 10,
+      days: 90, // Recent social content
+    });
+  }
+
+  /**
+   * Search TikTok specifically for travel content
+   */
+  async searchTikTok(destination: string, topic: string = ''): Promise<TavilySearchResponse> {
+    const query = `${destination} ${topic} travel tips hidden gems what to do site:tiktok.com`;
+    return this.search(query, {
+      search_depth: 'advanced',
+      topic: 'general',
+      max_results: 8,
+      days: 60,
+    });
+  }
+
+  /**
+   * Search Reddit for authentic local advice
+   */
+  async searchReddit(destination: string, topic: string = ''): Promise<TavilySearchResponse> {
+    const subreddits = 'site:reddit.com/r/travel OR site:reddit.com/r/solotravel OR site:reddit.com/r/TravelHacks';
+    const query = `${destination} ${topic} ${subreddits}`;
+    return this.search(query, {
+      search_depth: 'advanced',
+      topic: 'general',
+      max_results: 8,
+      days: 180,
+    });
+  }
+
+  /**
+   * Search YouTube for travel vlogs and guides
+   */
+  async searchYouTube(destination: string, topic: string = ''): Promise<TavilySearchResponse> {
+    const query = `${destination} ${topic} travel vlog guide site:youtube.com`;
+    return this.search(query, {
+      search_depth: 'advanced',
+      topic: 'general',
+      max_results: 6,
+      days: 365,
+    });
+  }
+
+  /**
+   * Comprehensive travel search across all sources
+   */
+  async comprehensiveSearch(destination: string, interests: string): Promise<{
+    traditional: TavilySearchResponse;
+    social: TavilySearchResponse;
+    reddit: TavilySearchResponse;
+  }> {
+    const [traditional, social, reddit] = await Promise.all([
+      this.searchDestinations(destination, interests),
+      this.searchSocialMedia(destination, interests),
+      this.searchReddit(destination, interests),
+    ]);
+    return { traditional, social, reddit };
+  }
+
+  /**
+   * Search for specific booking and reservation info
+   */
+  async searchBookingInfo(destination: string, type: 'hotel' | 'restaurant' | 'activity' | 'flight'): Promise<TavilySearchResponse> {
+    const typeQueries: Record<string, string> = {
+      hotel: `best hotels ${destination} booking reviews 2024 site:booking.com OR site:hotels.com OR site:tripadvisor.com`,
+      restaurant: `best restaurants ${destination} reservations reviews site:yelp.com OR site:tripadvisor.com OR site:thefork.com OR site:opentable.com`,
+      activity: `things to do ${destination} tours tickets site:getyourguide.com OR site:viator.com OR site:tripadvisor.com`,
+      flight: `flights to ${destination} deals site:skyscanner.com OR site:kayak.com OR site:google.com/flights`,
+    };
+    return this.search(typeQueries[type] || typeQueries.activity, {
+      search_depth: 'advanced',
+      topic: 'general',
+      max_results: 10,
+    });
+  }
+
+  /**
+   * Search for real-time information (weather, events, news)
+   */
+  async searchRealTimeInfo(destination: string): Promise<TavilySearchResponse> {
+    const query = `${destination} weather today events happening this week news`;
+    return this.search(query, {
+      search_depth: 'basic',
+      topic: 'news',
+      days: 1,
+      max_results: 5,
     });
   }
 }

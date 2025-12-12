@@ -36,7 +36,8 @@ import {
   WifiOff,
   AlertCircle,
   Plane,
-  Globe
+  Globe,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -122,6 +123,9 @@ export function TravelPlanningInterface() {
   const [userId] = useState(() => `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const [selectedHistoryPlan, setSelectedHistoryPlan] = useState<any>(null);
   const [redisConnected, setRedisConnected] = useState<boolean | null>(null);
+  const [bookingRefreshKey, setBookingRefreshKey] = useState(0);
+  const [isPdfGenerating, setIsPdfGenerating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const handleInputChange = (field: keyof TravelPreferences, value: string) => {
     setPreferences(prev => ({
@@ -245,7 +249,9 @@ export function TravelPlanningInterface() {
   };
 
   const generatePDF = async () => {
+    setIsPdfGenerating(true);
     try {
+      toast.info('Generating your PDF...', { duration: 2000 });
       const response = await fetch('/api/generate-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -266,7 +272,7 @@ export function TravelPlanningInterface() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `travel-itinerary-${Date.now()}.pdf`;
+      a.download = `TravelMind-${(itinerary?.destination || preferences.destination || 'itinerary').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
       
@@ -274,6 +280,8 @@ export function TravelPlanningInterface() {
     } catch (error) {
       console.error('PDF generation error:', error);
       toast.error('Failed to generate PDF. Please try again.');
+    } finally {
+      setIsPdfGenerating(false);
     }
   };
 
@@ -323,6 +331,7 @@ export function TravelPlanningInterface() {
 
   const handlePlanUpdate = (updatedPlan: any) => {
     console.log('🔄 handlePlanUpdate called with:', updatedPlan);
+    setIsUpdating(true);
     setWorkflowData(updatedPlan);
     setItinerary(updatedPlan.itinerary);
     setRecommendations(updatedPlan.recommendations || []);
@@ -331,10 +340,17 @@ export function TravelPlanningInterface() {
     console.log('🔄 Switching to itinerary tab...');
     setTimeout(() => {
       setActiveTab('itinerary');
+      setIsUpdating(false);
       console.log('🔄 Tab switched to itinerary');
     }, 500);
     
     toast.success('Itinerary updated! Switching to Itinerary tab...');
+  };
+
+  const handleBookingRefresh = () => {
+    console.log('🔄 Refreshing booking recommendations after chat modification');
+    setBookingRefreshKey(prev => prev + 1);
+    toast.info('Refreshing booking recommendations...');
   };
 
   const handleCitySwitch = async (city: string) => {
@@ -694,9 +710,23 @@ export function TravelPlanningInterface() {
                       </div>
                     )}
                     <div className="flex flex-wrap gap-2">
-                      <Button onClick={generatePDF} variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50">
-                        <Download className="w-4 h-4 mr-2" />
-                        Download PDF
+                      <Button 
+                        onClick={generatePDF} 
+                        variant="outline" 
+                        className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        disabled={isPdfGenerating}
+                      >
+                        {isPdfGenerating ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 mr-2" />
+                            Download PDF
+                          </>
+                        )}
                       </Button>
                       <Button onClick={resetPlanning} variant="outline" className="border-slate-200 text-slate-700 hover:bg-slate-50">
                         Plan Another Trip
@@ -740,6 +770,7 @@ export function TravelPlanningInterface() {
                           orchestration: orchestrationData
                         }}
                         onPlanUpdate={handlePlanUpdate}
+                        onBookingRefresh={handleBookingRefresh}
                       />
                       <div className="space-y-4">
                         <Card className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm">
@@ -776,6 +807,7 @@ export function TravelPlanningInterface() {
                       travelers={preferences.travelers}
                       budget={preferences.budget}
                       origin={preferences.comingFrom}
+                      refreshKey={bookingRefreshKey}
                     />
                   </TabsContent>
                 </Tabs>

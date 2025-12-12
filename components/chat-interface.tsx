@@ -19,7 +19,9 @@ import {
   DollarSign,
   HelpCircle,
   Edit3,
-  Info
+  Info,
+  Search,
+  Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -33,45 +35,46 @@ interface ChatMessage {
   timestamp: number;
   suggestions?: string[];
   interactionType?: 'question' | 'modification';
+  sources?: string[];
+  webSearched?: boolean;
 }
 
 interface ChatInterfaceProps {
   planId: string;
   initialData: any;
   onPlanUpdate?: (updatedPlan: any) => void;
+  onBookingRefresh?: () => void;
 }
 
-export function ChatInterface({ planId, initialData, onPlanUpdate }: ChatInterfaceProps) {
+export function ChatInterface({ planId, initialData, onPlanUpdate, onBookingRefresh }: ChatInterfaceProps) {
   console.log('🗣️ ChatInterface initialized with:', { planId, initialData: !!initialData, onPlanUpdate: !!onPlanUpdate });
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
       role: 'assistant',
-      content: `Hello! I'm your AI travel assistant. I've analyzed your travel plan for **${initialData?.itinerary?.destination || 'your destination'}**. 
+      content: `Hey there! 👋 I'm **Luna**, your personal travel companion! I'm super excited to help you plan your trip to **${initialData?.itinerary?.destination || 'your destination'}**.
 
-I can help you in two ways:
+Here's what I can do for you:
 
-🤔 **Ask Questions**: Get details about your itinerary, costs, activities, locations, and timing
-✏️ **Make Changes**: Modify your itinerary, add/remove activities, adjust budget, or find alternatives
+🔍 **Search the web** for the latest recommendations, TikTok trends, Reddit tips, and hidden gems
+📝 **Answer questions** about your itinerary, costs, timing, and local tips
+✨ **Make changes** to customize your trip exactly how you want it
+🎯 **Give personalized recommendations** based on what I know about the destination
 
-**Example Questions:**
-- "What's planned for day 2?"
-- "How much will accommodation cost?"
-- "What time does the museum tour start?"
+**Try asking me things like:**
+- "What's the best coffee shop locals love?"
+- "Find me a hidden gem restaurant on TikTok"
+- "What should I know about local customs?"
+- "Add a sunset cruise to day 2"
 
-**Example Modifications:**
-- "Add a food tour to day 3"
-- "Find cheaper hotel options"
-- "Remove the early morning activity"
-
-What would you like to know or change?`,
+What would you like to explore first?`,
       timestamp: Date.now(),
       suggestions: [
-        '? What activities are planned for each day?',
-        '💰 What\'s the total budget breakdown?',
-        '🍽️ Add more restaurant recommendations',
-        '🏛️ Include more cultural experiences',
-        '💡 Suggest budget-friendly alternatives'
+        '🔥 What\'s trending on TikTok for this destination?',
+        '🌟 Show me the hidden gems locals love',
+        '💰 How can I save money on this trip?',
+        '🍴 Find the best local food spots',
+        '📸 Most Instagram-worthy places to visit'
       ]
     }
   ]);
@@ -117,23 +120,36 @@ What would you like to know or change?`,
 
       const result = await response.json();
 
-      // Create assistant response message
+      // Create assistant response message with sources
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: result.response,
         timestamp: Date.now(),
         suggestions: result.suggestions,
-        interactionType: result.interactionType
+        interactionType: result.interactionType,
+        sources: result.sources,
+        webSearched: result.webSearched
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Show toast if web was searched
+      if (result.webSearched) {
+        toast.info('🔍 Searched the web for the latest info!', { duration: 2000 });
+      }
 
       // Handle different interaction types
       if (result.interactionType === 'modification' && result.updatedPlan && onPlanUpdate) {
         console.log('🔄 Sending plan update to parent:', result.updatedPlan);
         onPlanUpdate(result.updatedPlan);
         toast.success('Travel plan updated successfully! Check the Itinerary tab to see changes.');
+
+        // Trigger booking refresh so recommendations stay in sync
+        if (onBookingRefresh) {
+          console.log('🔄 Triggering booking refresh after modification');
+          onBookingRefresh();
+        }
         
         // Add a visual indicator message for modifications
         const updateNotification: ChatMessage = {
@@ -182,23 +198,32 @@ What would you like to know or change?`,
 
   return (
     <Card className="h-[600px] flex flex-col">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50">
         <CardTitle className="flex items-center gap-2">
-          <MessageSquare className="w-5 h-5 text-blue-600" />
-          Chat with Your Travel Plan
-          <Badge variant="outline" className="ml-auto">
-            <Sparkles className="w-3 h-3 mr-1" />
-            AI Assistant
+          <div className="p-1.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg">
+            <Sparkles className="w-4 h-4 text-white" />
+          </div>
+          <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+            Luna
+          </span>
+          <span className="text-sm font-normal text-gray-600 dark:text-gray-400">Your Travel Companion</span>
+          <Badge variant="outline" className="ml-auto bg-white/50 dark:bg-gray-800/50">
+            <Globe className="w-3 h-3 mr-1" />
+            Live Search
           </Badge>
         </CardTitle>
         <div className="flex gap-2 text-xs">
-          <Badge variant="secondary" className="flex items-center gap-1">
-            <HelpCircle className="w-3 h-3" />
-            Ask Questions
+          <Badge variant="secondary" className="flex items-center gap-1 bg-white/70 dark:bg-gray-800/70">
+            <Search className="w-3 h-3" />
+            Web + Social
           </Badge>
-          <Badge variant="secondary" className="flex items-center gap-1">
+          <Badge variant="secondary" className="flex items-center gap-1 bg-white/70 dark:bg-gray-800/70">
+            <HelpCircle className="w-3 h-3" />
+            Q&A
+          </Badge>
+          <Badge variant="secondary" className="flex items-center gap-1 bg-white/70 dark:bg-gray-800/70">
             <Edit3 className="w-3 h-3" />
-            Make Changes
+            Modify
           </Badge>
         </div>
       </CardHeader>
@@ -225,19 +250,26 @@ What would you like to know or change?`,
                   
                   <div className={`max-w-[80%] ${message.role === 'user' ? 'order-1' : ''}`}>
                     {/* Add interaction type indicator for assistant messages */}
-                    {message.role === 'assistant' && message.interactionType && (
-                      <div className="flex items-center gap-1 mb-1 text-xs text-gray-500">
-                        {message.interactionType === 'question' ? (
-                          <>
+                    {message.role === 'assistant' && (message.interactionType || message.webSearched) && (
+                      <div className="flex items-center gap-2 mb-1 text-xs text-gray-500">
+                        {message.webSearched && (
+                          <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                            <Search className="w-3 h-3" />
+                            Searched the web
+                          </span>
+                        )}
+                        {message.interactionType === 'question' && (
+                          <span className="flex items-center gap-1">
                             <HelpCircle className="w-3 h-3" />
-                            <span>Information</span>
-                          </>
-                        ) : message.interactionType === 'modification' ? (
-                          <>
+                            Information
+                          </span>
+                        )}
+                        {message.interactionType === 'modification' && (
+                          <span className="flex items-center gap-1 text-green-600">
                             <Edit3 className="w-3 h-3" />
-                            <span>Modification Applied</span>
-                          </>
-                        ) : null}
+                            Modification Applied
+                          </span>
+                        )}
                       </div>
                     )}
                     
@@ -246,7 +278,9 @@ What would you like to know or change?`,
                         ? 'bg-blue-600 text-white ml-auto' 
                         : message.interactionType === 'modification'
                           ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-                          : 'bg-gray-100 dark:bg-gray-800'
+                          : message.webSearched
+                            ? 'bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800'
+                            : 'bg-gray-100 dark:bg-gray-800'
                     }`}>
                       {message.role === 'assistant' ? (
                         <ReactMarkdown 
@@ -259,6 +293,28 @@ What would you like to know or change?`,
                         <p className="text-sm">{message.content}</p>
                       )}
                     </div>
+                    
+                    {/* Display sources if available */}
+                    {message.sources && message.sources.length > 0 && (
+                      <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                          📚 View {message.sources.length} source{message.sources.length > 1 ? 's' : ''}
+                        </summary>
+                        <div className="mt-1 space-y-1 pl-2 border-l-2 border-gray-200 dark:border-gray-700">
+                          {message.sources.slice(0, 5).map((source, index) => (
+                            <a
+                              key={index}
+                              href={source}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block text-blue-600 dark:text-blue-400 hover:underline truncate"
+                            >
+                              {new URL(source).hostname.replace('www.', '')}
+                            </a>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                     
                     {message.suggestions && message.suggestions.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -295,15 +351,20 @@ What would you like to know or change?`,
                 className="flex gap-3"
               >
                 <Avatar className="w-8 h-8 mt-1">
-                  <AvatarFallback className="bg-blue-100 text-blue-600">
+                  <AvatarFallback className="bg-blue-100 text-blue-600 animate-pulse">
                     <Bot className="w-4 h-4" />
                   </AvatarFallback>
                 </Avatar>
                 <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
                   <div className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
                     <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Thinking...
+                      Analyzing your request
+                    </span>
+                    <span className="flex gap-0.5">
+                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </span>
                   </div>
                 </div>

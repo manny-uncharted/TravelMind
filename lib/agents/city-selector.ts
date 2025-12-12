@@ -139,7 +139,9 @@ export class CitySelector {
       return analysis;
     } catch (error) {
       console.error('❌ City Selector Agent error:', error);
-      return this.getMockAnalysis(preferences);
+      throw new Error(
+        `City selection failed: ${(error as Error)?.message || 'Unknown error'}`
+      );
     }
   }
 

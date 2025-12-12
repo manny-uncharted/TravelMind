@@ -3,6 +3,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CacheManager, CACHE_KEYS, CacheKeyHelpers } from '@/lib/redis';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { applyPatch } from 'fast-json-patch';
+import { TavilySearchTool } from '@/lib/tools/tavily-search';
+
+const tavilySearch = new TavilySearchTool();
+
+// Helper: Detect if user message needs a web search
+function detectSearchIntent(message: string): boolean {
+  const searchTriggers = [
+    /recommend/i, /suggest/i, /best\s+\w+/i, /where\s+(can|should|to)/i,
+    /find\s+(me|a|the)/i, /looking\s+for/i, /any\s+(good|great)/i,
+    /what('s|s|\s+is)\s+(the\s+)?(best|top|popular)/i, /hidden\s+gem/i,
+    /local\s+(favorite|tip|secret)/i, /tiktok/i, /trending/i,
+    /instagram/i, /viral/i, /reddit/i, /youtube/i,
+    /current/i, /latest/i, /2024/i, /2025/i, /now/i,
+    /book\s+(a|the)/i, /reservation/i, /ticket/i,
+    /weather/i, /open\s+(now|today)/i, /hours/i,
+  ];
+  return searchTriggers.some(regex => regex.test(message));
+}
+
+// Helper: Extract what to search for
+function extractSearchTopic(message: string, destination: string): string {
+  const cleaned = message
+    .replace(/can you|could you|please|i want|i need|i'm looking for|find me|recommend|suggest/gi, '')
+    .replace(/in\s+\w+/gi, '')
+    .trim();
+  return cleaned.slice(0, 100);
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +38,7 @@ export async function POST(req: NextRequest) {
       message,
       role = 'user',
       currentPlan,
+      chatHistory = [],
     } = await req.json();
 
     if (!planId || !message) {
@@ -20,18 +48,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-        // ── 1. Fetch (or seed) cached plan ────────────────────────────────────────────
-    // Support both old format (planId) and new location-based keys
+    // ── 1. Fetch (or seed) cached plan ────────────────────────────────────────────
     let planKey: string;
     
     if (planId.startsWith('travel_plan:')) {
-      // New format: already a complete cache key
       planKey = planId;
     } else if (planId === 'current' || planId.length < 20) {
-      // Old format: fallback to generic key (for backward compatibility)
       planKey = CACHE_KEYS.TRAVEL_PLAN(planId);
     } else {
-      // Assume it's a location-based key
       planKey = planId;
     }
     
@@ -40,7 +64,6 @@ export async function POST(req: NextRequest) {
     let plan = await CacheManager.get<any>(planKey);
 
     if (!plan && currentPlan) {
-      // Ensure the plan structure is correct for caching
       const normalizedPlan = {
         itinerary: currentPlan.itinerary || null,
         recommendations: currentPlan.recommendations || [],
@@ -48,17 +71,15 @@ export async function POST(req: NextRequest) {
         orchestration: currentPlan.orchestration || {}
       };
       
-      await CacheManager.set(planKey, normalizedPlan, 86_400); // 24 h
+      await CacheManager.set(planKey, normalizedPlan, 86_400);
       plan = normalizedPlan;
       console.log(`[chat-with-plan] seeded cache for ${planId}`);
     }
 
-    // If currentPlan is provided and differs from cached plan, update the cache
     if (currentPlan && plan) {
       const hasItinerary = !!currentPlan.itinerary;
       const cachedHasItinerary = !!plan.itinerary;
       
-      // If currentPlan has itinerary but cached doesn't, update cache
       if (hasItinerary && !cachedHasItinerary) {
         console.log(`[chat-with-plan] Updating cache with fresh itinerary data for ${planId}`);
         const normalizedPlan = {
@@ -77,61 +98,124 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
     }
 
-    // Debug: Log the structure of the cached plan
     console.log('[chat-with-plan] Plan structure:', {
       hasItinerary: !!plan.itinerary,
       planKeys: Object.keys(plan),
-      itineraryKeys: plan.itinerary ? Object.keys(plan.itinerary) : null,
       scheduleLength: plan.itinerary?.schedule?.length,
-      localInsightsLength: plan.itinerary?.localInsights?.length,
-      budgetAmount: plan.itinerary?.budget?.amount
     });
 
-    // ── 2. Build Gemini prompt for Q&A and modifications ──────────────────────────
+    // ── 2. Smart web search when needed ───────────────────────────────────────────
+    const destination = plan.itinerary?.destination || currentPlan?.itinerary?.destination || 'the destination';
+    const needsWebSearch = detectSearchIntent(message);
+    
+    let webSearchResults = '';
+    let searchSources: string[] = [];
+    
+    if (needsWebSearch) {
+      console.log('[chat-with-plan] 🔍 Performing smart web search...');
+      try {
+        const searchTopic = extractSearchTopic(message, destination);
+        
+        // Parallel search across multiple sources
+        const searchPromises = [
+          tavilySearch.search(`${destination} ${searchTopic}`, { 
+            max_results: 5, 
+            search_depth: 'advanced' 
+          }),
+        ];
+        
+        // Add social media search for trending/recommendation queries
+        if (/tiktok|trending|viral|instagram|hidden gem|local/i.test(message)) {
+          searchPromises.push(tavilySearch.searchSocialMedia(destination, searchTopic));
+        }
+        
+        // Add Reddit for authentic advice
+        if (/reddit|authentic|real|honest|local tip/i.test(message)) {
+          searchPromises.push(tavilySearch.searchReddit(destination, searchTopic));
+        }
+
+        const results = await Promise.all(searchPromises);
+        const allResults = results.flatMap(r => r.results).slice(0, 10);
+        
+        if (allResults.length > 0) {
+          searchSources = allResults.map(r => r.url);
+          webSearchResults = `
+### 🌐 Live Search Results (just searched the web for you):
+${allResults.map((r, i) => `
+**${i + 1}. ${r.title}**
+Source: ${r.url}
+${r.content.slice(0, 250)}${r.content.length > 250 ? '...' : ''}
+`).join('\n')}`;
+          console.log(`[chat-with-plan] Found ${allResults.length} search results`);
+        }
+      } catch (searchError) {
+        console.error('[chat-with-plan] Web search failed:', searchError);
+      }
+    }
+
+    // ── 3. Build personalized AI prompt ───────────────────────────────────────────
+    const recentHistory = chatHistory.slice(-6).map((msg: any) => 
+      `${msg.role === 'user' ? 'Traveler' : 'Luna'}: ${msg.content}`
+    ).join('\n');
+
     const prompt = `
-You are an AI travel concierge helping a traveller with their existing itinerary. You can both answer questions and make modifications.
+You are **Luna**, a warm, knowledgeable, and enthusiastic AI travel companion. You're like that friend who's been everywhere and genuinely loves helping others discover amazing places.
 
-CAPABILITIES:
-1. **Answer Questions**: Provide detailed information about the itinerary (activities, costs, locations, timing, etc.)
-2. **Make Modifications**: Apply changes to the itinerary when explicitly requested
+## Your Personality
+- **Warm & Personal**: Talk like a trusted friend. Use "you" and "your" naturally. Be encouraging!
+- **Enthusiastic**: Share genuine excitement! "Oh, you're going to absolutely love this spot!" 
+- **Expert Knowledge**: You know destinations deeply—local spots, hidden gems, cultural nuances, timing tips
+- **Proactive**: Suggest things they haven't thought of. Anticipate needs. Connect the dots.
+- **Authentic**: Only reference REAL places. Never make up names or details.
 
-TASKS:
-1. Inspect the current itinerary object provided below.
-2. Analyze the user's message to determine if it's:
-   - A QUESTION about the itinerary (asking for information, clarification, details)
-   - A MODIFICATION REQUEST (asking to change, add, remove, or adjust something)
-3. For QUESTIONS: Provide detailed, helpful answers based on the itinerary data
-4. For MODIFICATIONS: Generate JSON Patch operations (RFC-6902) to transform the itinerary
-5. Always provide a natural-language response
+## Your Superpowers
+- Deep destination knowledge from traditional travel sources AND social media (TikTok trends, Reddit tips, YouTube vlogs)
+- Cultural intelligence—customs, etiquette, what to wear, how to behave
+- Budget optimization and value-finding expertise  
+- Booking strategy (best times, how to get deals, reservation tips)
+- Hidden gems that only locals and frequent travelers know
+- Practical logistics (transportation, timing, weather considerations)
 
-RESPONSE FORMAT:
-{
-  "interaction_type": "question" | "modification",
-  "patch": <RFC‑6902 array - only for modifications, empty array for questions>,
-  "assistant_response": <detailed response to user>,
-  "suggestions": <string[] - relevant follow-up questions or actions>
-}
-
-EXAMPLES:
-- "What activities are planned for day 2?" → interaction_type: "question", patch: []
-- "How much will the hotel cost?" → interaction_type: "question", patch: []
-- "What time does the museum tour start?" → interaction_type: "question", patch: []
-- "Tell me about the restaurants recommended" → interaction_type: "question", patch: []
-- "Add a food tour to day 3" → interaction_type: "modification", patch: [...]
-- "Remove the museum visit" → interaction_type: "modification", patch: [...]
-- "Change the hotel to something cheaper" → interaction_type: "modification", patch: [...]
-- "Increase the budget for meals" → interaction_type: "modification", patch: [...]
-
-For QUESTIONS: Provide detailed, informative answers with specific details from the itinerary.
-For MODIFICATIONS: Generate appropriate JSON patch operations and explain what will be changed.
-
-### Current Itinerary
+## Current Trip Context
+**Destination**: ${destination}
+**Their Itinerary**:
 \`\`\`json
 ${JSON.stringify(plan.itinerary, null, 2)}
 \`\`\`
 
-### User Message
+${webSearchResults ? `## 🔍 Fresh Intel from the Web\nI just searched the internet for relevant information:\n${webSearchResults}` : ''}
+
+${recentHistory ? `## Our Conversation So Far\n${recentHistory}` : ''}
+
+## What They Just Said
 "${message}"
+
+## How to Respond
+1. **Feel their intent**: Are they asking a question, wanting a change, or just chatting?
+2. **Be genuinely helpful**: Give specific, actionable information
+3. **Use web results naturally**: If I searched, weave those insights in conversationally (cite sources!)
+4. **Keep it warm**: You're their travel buddy, not a robot
+
+## Response Format (JSON)
+{
+  "interaction_type": "question" | "modification",
+  "patch": [],
+  "assistant_response": "Your warm, markdown-formatted response. Be specific with real place names, addresses, tips. Include sources if you used web search.",
+  "suggestions": ["3-4 natural follow-ups they might want to explore"],
+  "sources": ["URLs you referenced from web search, if any"]
+}
+
+## For Modifications
+If they want to CHANGE their itinerary, generate RFC-6902 JSON Patch operations in the "patch" array.
+
+## Your Voice Examples
+- "Ooh, great question! So here's the inside scoop on that..."
+- "I actually just looked this up for you, and guess what I found..."  
+- "You know what would be absolutely perfect here? Let me tell you about..."
+- "Honestly? Skip [tourist trap] and go to [authentic spot] instead. Trust me!"
+- "I love that you asked about this! There's this amazing place that most tourists never find..."
+
+Remember: Be specific, be warm, be genuinely helpful. Make them feel like they have an expert friend helping them plan.
 `;
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -149,28 +233,33 @@ ${JSON.stringify(plan.itinerary, null, 2)}
     const patch: any[] = Array.isArray(aiJson.patch) ? aiJson.patch : [];
     const assistantResponse: string = aiJson.assistant_response || 'I understand your request.';
     const suggestions: string[] = Array.isArray(aiJson.suggestions) ? aiJson.suggestions : [];
+    const sources: string[] = Array.isArray(aiJson.sources) ? aiJson.sources : searchSources;
 
-    console.log(`[chat-with-plan] Interaction type: ${interactionType}, patches: ${patch.length}`);
+    console.log(`[chat-with-plan] Response: type=${interactionType}, patches=${patch.length}, sources=${sources.length}`);
 
-    // ── 3. Apply patch if needed ──────────────────────────────────────────────────
+    // ── 4. Apply patch if modification ────────────────────────────────────────────
     let patchApplied = false;
     if (patch.length > 0) {
-      console.log(`[chat-with-plan] Applying ${patch.length} patch operations:`, patch);
-      const patched = applyPatch({ ...plan.itinerary }, patch, true, false);
-      plan.itinerary = patched.newDocument;
-      patchApplied = true;
-      await CacheManager.set(planKey, plan, 86_400);
-      console.log(`[chat-with-plan] Plan updated and cached for ${planId}`);
-    } else {
-      console.log(`[chat-with-plan] No patches to apply for ${planId}`);
+      console.log(`[chat-with-plan] Applying ${patch.length} patch operations`);
+      try {
+        const patched = applyPatch({ ...plan.itinerary }, patch, true, false);
+        plan.itinerary = patched.newDocument;
+        patchApplied = true;
+        await CacheManager.set(planKey, plan, 86_400);
+        console.log(`[chat-with-plan] Plan updated and cached`);
+      } catch (patchError) {
+        console.error('[chat-with-plan] Patch failed:', patchError);
+      }
     }
 
-    // ── 4. Return to client ───────────────────────────────────────────────────────
+    // ── 5. Return response ────────────────────────────────────────────────────────
     return NextResponse.json({
       response: assistantResponse,
       suggestions,
+      sources,
       interactionType,
       updatedPlan: patchApplied ? plan : null,
+      webSearched: needsWebSearch && webSearchResults.length > 0,
     });
   } catch (err) {
     console.error('[chat-with-plan] error:', err);

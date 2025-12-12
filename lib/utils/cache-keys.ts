@@ -3,6 +3,18 @@
  * These utilities do not import any Node.js-specific dependencies.
  */
 
+/**
+ * Clean a string for use in cache keys - removes special characters and normalizes
+ */
+function cleanString(str: string): string {
+  return str
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')  // Replace non-alphanumeric with underscore
+    .replace(/^_+|_+$/g, '')       // Remove leading/trailing underscores
+    .slice(0, 50);                 // Limit length
+}
+
 // Cache keys for various data types to ensure consistent key naming.
 export const CACHE_KEYS = {
   TRAVEL_PLAN: (id: string) => `travel_plan:${id}`,

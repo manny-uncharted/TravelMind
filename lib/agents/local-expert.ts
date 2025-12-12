@@ -136,7 +136,9 @@ export class LocalExpert {
       return analysis;
     } catch (error) {
       console.error('❌ Local Expert Agent error:', error);
-      return this.getMockAnalysis(city, interests);
+      throw new Error(
+        `Local insights lookup failed: ${(error as Error)?.message || 'Unknown error'}`
+      );
     }
   }
 
