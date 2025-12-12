@@ -227,7 +227,33 @@ Remember: Be specific, be warm, be genuinely helpful. Make them feel like they h
     });
 
     const { text } = await geminiRes.response;
-    const aiJson = JSON.parse(text());
+    const rawText = text();
+    
+    // Parse JSON with error recovery for bad escape sequences
+    let aiJson;
+    try {
+      aiJson = JSON.parse(rawText);
+    } catch (parseError) {
+      console.warn('[chat-with-plan] JSON parse failed, attempting recovery...');
+      try {
+        // Fix common escape issues: replace unescaped backslashes and control chars
+        const fixedText = rawText
+          .replace(/\\(?!["\\/bfnrtu])/g, '\\\\') // Escape lone backslashes
+          .replace(/[\x00-\x1F\x7F]/g, ' '); // Remove control characters
+        aiJson = JSON.parse(fixedText);
+        console.log('[chat-with-plan] JSON recovery successful');
+      } catch {
+        // Final fallback: return a safe response
+        console.error('[chat-with-plan] JSON recovery failed, using fallback');
+        aiJson = {
+          interaction_type: 'question',
+          assistant_response: "I'd love to help you with that! Could you tell me a bit more about what you're looking for?",
+          suggestions: ['Tell me more about your preferences', 'What activities interest you?'],
+          patch: [],
+          sources: searchSources
+        };
+      }
+    }
 
     const interactionType = aiJson.interaction_type || 'question';
     const patch: any[] = Array.isArray(aiJson.patch) ? aiJson.patch : [];
