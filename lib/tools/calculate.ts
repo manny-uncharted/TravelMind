@@ -39,7 +39,7 @@ export class CalculateTool {
         expression,
         result: 'Error',
         type,
-        breakdown: { error: error.message }
+        breakdown: { error: error instanceof Error ? error.message : 'Unknown error' }
       };
     }
   }

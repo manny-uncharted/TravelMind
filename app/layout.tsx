@@ -1,10 +1,10 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import { Toaster } from '@/components/ui/sonner';
 import { ThemeProvider } from '@/lib/theme-provider';
 
-const inter = Inter({ subsets: ['latin'] });
+// Use system font stack instead of Google Fonts to avoid network issues during build
+const fontClass = 'font-sans';
 
 export const metadata: Metadata = {
   title: 'TravelMind - AI-Powered Travel Planning',
@@ -18,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={fontClass}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
