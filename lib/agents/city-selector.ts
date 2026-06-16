@@ -24,7 +24,7 @@ export class CitySelector {
   private model: any;
 
   constructor() {
-    this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    this.model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
   }
 
   async analyze(preferences: {
@@ -37,7 +37,7 @@ export class CitySelector {
     comingFrom?: string;
   }): Promise<CityAnalysis> {
     console.log('🏙️ City Selector Agent: Starting destination analysis');
-    
+
     const prompt = `
       As a City Selector AI agent specialized in destination analysis, evaluate these travel preferences:
       
@@ -79,9 +79,9 @@ export class CitySelector {
           responseSchema: {
             type: "OBJECT",
             properties: {
-              selectedCity: { 
-                type: "STRING", 
-                description: "The primary recommended city with country" 
+              selectedCity: {
+                type: "STRING",
+                description: "The primary recommended city with country"
               },
               alternatives: {
                 type: "ARRAY",
@@ -104,38 +104,38 @@ export class CitySelector {
                   required: ["city", "rating", "highlights", "budget", "bestFor", "reasoning"]
                 }
               },
-              searchQuery: { 
-                type: "STRING", 
-                description: "Optimized search query for TavilySearchResults" 
+              searchQuery: {
+                type: "STRING",
+                description: "Optimized search query for TavilySearchResults"
               },
-              confidence: { 
-                type: "NUMBER", 
-                minimum: 0, 
+              confidence: {
+                type: "NUMBER",
+                minimum: 0,
                 maximum: 1,
-                description: "Confidence score for recommendations" 
+                description: "Confidence score for recommendations"
               },
-              reasoning: { 
-                type: "STRING", 
-                description: "Overall reasoning for the selection" 
+              reasoning: {
+                type: "STRING",
+                description: "Overall reasoning for the selection"
               }
             },
             required: ["selectedCity", "alternatives", "searchQuery", "confidence", "reasoning"]
           }
         }
       });
-      
+
       const response = await result.response;
       const analysis = JSON.parse(response.text());
-      
+
       // Add calculations metadata
       analysis.calculations = this.generateCalculations(preferences, analysis);
-      
+
       console.log('✅ City Selector Agent: Analysis complete', {
         selectedCity: analysis.selectedCity,
         alternatives: analysis.alternatives?.length || 0,
         confidence: analysis.confidence
       });
-      
+
       return analysis;
     } catch (error) {
       console.error('❌ City Selector Agent error:', error);
@@ -146,9 +146,9 @@ export class CitySelector {
   }
 
   private generateCalculations(preferences: any, analysis: any): any[] {
-    const budgetMultiplier = preferences.budget === 'budget' ? 0.7 : 
-                           preferences.budget === 'luxury' ? 1.5 : 1.0;
-    
+    const budgetMultiplier = preferences.budget === 'budget' ? 0.7 :
+      preferences.budget === 'luxury' ? 1.5 : 1.0;
+
     return [
       {
         type: "budget_analysis",
@@ -171,9 +171,9 @@ export class CitySelector {
   }
 
   private getMockAnalysis(preferences: any): CityAnalysis {
-    const budgetMultiplier = preferences.budget === 'budget' ? 0.7 : 
-                           preferences.budget === 'luxury' ? 1.5 : 1.0;
-    
+    const budgetMultiplier = preferences.budget === 'budget' ? 0.7 :
+      preferences.budget === 'luxury' ? 1.5 : 1.0;
+
     // Generate recommendations based on actual destination preference
     const destinationLower = preferences.destination.toLowerCase();
     let mockRecommendations: CityRecommendation[] = [];

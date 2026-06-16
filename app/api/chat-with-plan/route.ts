@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
 
     // ── 1. Fetch (or seed) cached plan ────────────────────────────────────────────
     let planKey: string;
-    
+
     if (planId.startsWith('travel_plan:')) {
       planKey = planId;
     } else if (planId === 'current' || planId.length < 20) {
@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
     } else {
       planKey = planId;
     }
-    
+
     console.log(`[chat-with-plan] Using cache key: ${planKey}`);
-    
+
     let plan = await CacheManager.get<any>(planKey);
 
     if (!plan && currentPlan) {
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         workflow_data: currentPlan.workflow_data || {},
         orchestration: currentPlan.orchestration || {}
       };
-      
+
       await CacheManager.set(planKey, normalizedPlan, 86_400);
       plan = normalizedPlan;
       console.log(`[chat-with-plan] seeded cache for ${planId}`);
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
     if (currentPlan && plan) {
       const hasItinerary = !!currentPlan.itinerary;
       const cachedHasItinerary = !!plan.itinerary;
-      
+
       if (hasItinerary && !cachedHasItinerary) {
         console.log(`[chat-with-plan] Updating cache with fresh itinerary data for ${planId}`);
         const normalizedPlan = {
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
           workflow_data: currentPlan.workflow_data || {},
           orchestration: currentPlan.orchestration || {}
         };
-        
+
         await CacheManager.set(planKey, normalizedPlan, 86_400);
         plan = normalizedPlan;
       }
@@ -107,28 +107,28 @@ export async function POST(req: NextRequest) {
     // ── 2. Smart web search when needed ───────────────────────────────────────────
     const destination = plan.itinerary?.destination || currentPlan?.itinerary?.destination || 'the destination';
     const needsWebSearch = detectSearchIntent(message);
-    
+
     let webSearchResults = '';
     let searchSources: string[] = [];
-    
+
     if (needsWebSearch) {
       console.log('[chat-with-plan] 🔍 Performing smart web search...');
       try {
         const searchTopic = extractSearchTopic(message, destination);
-        
+
         // Parallel search across multiple sources
         const searchPromises = [
-          tavilySearch.search(`${destination} ${searchTopic}`, { 
-            max_results: 5, 
-            search_depth: 'advanced' 
+          tavilySearch.search(`${destination} ${searchTopic}`, {
+            max_results: 5,
+            search_depth: 'advanced'
           }),
         ];
-        
+
         // Add social media search for trending/recommendation queries
         if (/tiktok|trending|viral|instagram|hidden gem|local/i.test(message)) {
           searchPromises.push(tavilySearch.searchSocialMedia(destination, searchTopic));
         }
-        
+
         // Add Reddit for authentic advice
         if (/reddit|authentic|real|honest|local tip/i.test(message)) {
           searchPromises.push(tavilySearch.searchReddit(destination, searchTopic));
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
 
         const results = await Promise.all(searchPromises);
         const allResults = results.flatMap(r => r.results).slice(0, 10);
-        
+
         if (allResults.length > 0) {
           searchSources = allResults.map(r => r.url);
           webSearchResults = `
@@ -154,7 +154,7 @@ ${r.content.slice(0, 250)}${r.content.length > 250 ? '...' : ''}
     }
 
     // ── 3. Build personalized AI prompt ───────────────────────────────────────────
-    const recentHistory = chatHistory.slice(-6).map((msg: any) => 
+    const recentHistory = chatHistory.slice(-6).map((msg: any) =>
       `${msg.role === 'user' ? 'Traveler' : 'Luna'}: ${msg.content}`
     ).join('\n');
 
@@ -219,7 +219,7 @@ Remember: Be specific, be warm, be genuinely helpful. Make them feel like they h
 `;
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
 
     const geminiRes = await model.generateContent({
       contents: [{ role, parts: [{ text: prompt }] }],
@@ -228,7 +228,7 @@ Remember: Be specific, be warm, be genuinely helpful. Make them feel like they h
 
     const { text } = await geminiRes.response;
     const rawText = text();
-    
+
     // Parse JSON with error recovery for bad escape sequences
     let aiJson;
     try {

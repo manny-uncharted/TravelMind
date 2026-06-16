@@ -27,12 +27,12 @@ export class LocalExpert {
   private model: any;
 
   constructor() {
-    this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    this.model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
   }
 
   async analyze(city: string, interests: string): Promise<LocalExpertAnalysis> {
     console.log(`🗺️ Local Expert Agent: Analyzing ${city} for interests: ${interests}`);
-    
+
     const prompt = `
       As a Local Expert AI agent for ${city}, provide deep insider knowledge and recommendations:
       
@@ -74,8 +74,8 @@ export class LocalExpert {
                 items: {
                   type: "OBJECT",
                   properties: {
-                    type: { 
-                      type: "STRING", 
+                    type: {
+                      type: "STRING",
                       enum: ["hidden_gem", "local_favorite", "cultural_tip", "seasonal_event", "insider_secret"]
                     },
                     name: { type: "STRING" },
@@ -109,30 +109,30 @@ export class LocalExpert {
                 description: "Insider secrets that locals know",
                 items: { type: "STRING" }
               },
-              confidence: { 
-                type: "NUMBER", 
-                minimum: 0, 
+              confidence: {
+                type: "NUMBER",
+                minimum: 0,
                 maximum: 1,
-                description: "Confidence in local knowledge accuracy" 
+                description: "Confidence in local knowledge accuracy"
               }
             },
             required: ["insights", "recommendations", "culturalTips", "seasonalAdvice", "localSecrets", "confidence"]
           }
         }
       });
-      
+
       const response = await result.response;
       const analysis = JSON.parse(response.text());
-      
+
       // Generate search queries for TavilySearchResults
       analysis.searchQueries = this.generateSearchQueries(city, interests);
-      
+
       console.log('✅ Local Expert Agent: Analysis complete', {
         insights: analysis.insights?.length || 0,
         recommendations: analysis.recommendations?.length || 0,
         confidence: analysis.confidence
       });
-      
+
       return analysis;
     } catch (error) {
       console.error('❌ Local Expert Agent error:', error);
@@ -145,7 +145,7 @@ export class LocalExpert {
   private generateSearchQueries(city: string, interests: string): string[] {
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().toLocaleString('default', { month: 'long' });
-    
+
     return [
       `${city} hidden gems locals only ${currentYear}`,
       `${city} authentic ${interests} experiences off beaten path`,
@@ -159,7 +159,7 @@ export class LocalExpert {
   private getMockAnalysis(city: string, interests: string): LocalExpertAnalysis {
     // Generate city-specific insights based on the actual city name
     const insights = this.generateCitySpecificInsights(city, interests);
-    
+
     return {
       insights,
       recommendations: [
@@ -197,7 +197,7 @@ export class LocalExpert {
 
   private generateCitySpecificInsights(city: string, interests: string): LocalInsight[] {
     const cityLower = city.toLowerCase();
-    
+
     // European cities
     if (cityLower.includes('barcelona')) {
       return [
@@ -246,7 +246,7 @@ export class LocalExpert {
         }
       ];
     }
-    
+
     // Asian cities
     else if (cityLower.includes('bangkok')) {
       return [
@@ -272,7 +272,7 @@ export class LocalExpert {
         }
       ];
     }
-    
+
     // Default insights for any city
     return [
       {

@@ -70,7 +70,7 @@ export class TravelConcierge {
   private model: any;
 
   constructor() {
-    this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    this.model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash' });
   }
 
   async createItinerary(
@@ -144,7 +144,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
           responseSchema: {
             type: 'OBJECT',
             properties: {
-              schedule: { 
+              schedule: {
                 type: 'ARRAY',
                 items: {
                   type: 'OBJECT',
@@ -187,7 +187,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
                   required: ['day', 'date', 'title', 'activities', 'dailyBudget']
                 }
               },
-              totalBudget: { 
+              totalBudget: {
                 type: 'OBJECT',
                 properties: {
                   amount: { type: 'STRING' },
@@ -204,7 +204,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
                 },
                 required: ['amount', 'breakdown']
               },
-              logistics: { 
+              logistics: {
                 type: 'OBJECT',
                 properties: {
                   transportation: { type: 'STRING' },
@@ -228,7 +228,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
 
       const response = await result.response;
       const responseText = response.text();
-      
+
       // Try to parse JSON, with recovery for truncated responses
       let itinerary;
       try {
@@ -255,7 +255,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
 
       // add calculations & bookings
       itinerary.calculations = this.generateCalculations(days, budget, travelers);
-      itinerary.bookingInfo  = await this.generateBookingInfo(
+      itinerary.bookingInfo = await this.generateBookingInfo(
         city,
         startDate,
         endDate,
@@ -290,25 +290,25 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     try {
       // Remove any trailing incomplete content and try to close brackets
       let fixed = text.trim();
-      
+
       // Count open brackets
       const openBraces = (fixed.match(/{/g) || []).length;
       const closeBraces = (fixed.match(/}/g) || []).length;
       const openBrackets = (fixed.match(/\[/g) || []).length;
       const closeBrackets = (fixed.match(/]/g) || []).length;
-      
+
       // If we're in the middle of a string, try to close it
       if (fixed.includes('"') && !fixed.endsWith('"') && !fixed.endsWith('}') && !fixed.endsWith(']')) {
         // Find the last complete structure
         const lastCompleteObject = fixed.lastIndexOf('},');
         const lastCompleteArray = fixed.lastIndexOf('],');
         const lastComplete = Math.max(lastCompleteObject, lastCompleteArray);
-        
+
         if (lastComplete > fixed.length * 0.7) { // Only if we have most of the content
           fixed = fixed.substring(0, lastComplete + 1);
         }
       }
-      
+
       // Add missing closing brackets
       for (let i = 0; i < openBrackets - closeBrackets; i++) {
         fixed += ']';
@@ -316,7 +316,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
       for (let i = 0; i < openBraces - closeBraces; i++) {
         fixed += '}';
       }
-      
+
       return JSON.parse(fixed);
     } catch {
       return null;
@@ -327,29 +327,29 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
 
   private calculateDays(startDate: string, endDate: string): number {
     console.log(`🔢 calculateDays input: startDate="${startDate}", endDate="${endDate}"`);
-    
+
     // Validate inputs
     if (!startDate || !endDate) {
       console.warn('⚠️ Missing dates, defaulting to 7 days');
       return 7;
     }
-    
+
     const start = new Date(startDate);
-    const end   = new Date(endDate);
-    
+    const end = new Date(endDate);
+
     // Check for invalid dates
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       console.warn('⚠️ Invalid date format, defaulting to 7 days');
       return 7;
     }
-    
-    const diff  = Math.abs(end.valueOf() - start.valueOf());
+
+    const diff = Math.abs(end.valueOf() - start.valueOf());
     const days = Math.max(1, Math.ceil(diff / 86_400_000)); // ms per day
-    
+
     // Add +1 because we include both start and end day
     const totalDays = days + 1;
     console.log(`📊 Calculated: ${totalDays} days (including both start and end day)`);
-    
+
     return totalDays;
   }
 
@@ -371,17 +371,17 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     startDate: string
   ): DaySchedule[] {
     const currentDays = schedule.length;
-    
+
     if (currentDays === expectedDays) {
       console.log(`✓ Schedule has correct number of days: ${expectedDays}`);
       return schedule;
     }
-    
+
     if (currentDays > expectedDays) {
       console.log(`⚠️ Truncating schedule from ${currentDays} to ${expectedDays} days`);
       return schedule.slice(0, expectedDays);
     }
-    
+
     // Need to add more days
     console.log(`⚠️ Padding schedule from ${currentDays} to ${expectedDays} days`);
     const themes = [
@@ -394,11 +394,11 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
       { title: `Shopping & Souvenirs`, theme: 'Shopping' },
       { title: `Nature Escape`, theme: 'Nature & Outdoors' },
     ];
-    
+
     for (let i = currentDays; i < expectedDays; i++) {
       const themeIdx = i % themes.length;
       const dayDate = this.addDays(startDate, i);
-      
+
       schedule.push({
         day: i + 1,
         date: dayDate,
@@ -411,24 +411,24 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
         notes: [`Extended itinerary day ${i + 1}`]
       });
     }
-    
+
     return schedule;
   }
   private generateCalculations(days: number, budget: string, travelers: string) {
     const multiplier = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1;
-    const group      = travelers === '5+' ? 1.2 : 1;
-    const daily      = Math.round(250 * multiplier * group);
+    const group = travelers === '5+' ? 1.2 : 1;
+    const daily = Math.round(250 * multiplier * group);
 
     return [
       {
-        type   : 'daily_budget_breakdown',
+        type: 'daily_budget_breakdown',
         totalDaily: daily,
         accommodation: Math.round(daily * 0.35),
-        food        : Math.round(daily * 0.30),
-        activities  : Math.round(daily * 0.25),
-        transport   : Math.round(daily * 0.10),
+        food: Math.round(daily * 0.30),
+        activities: Math.round(daily * 0.25),
+        transport: Math.round(daily * 0.10),
         days,
-        totalTrip   : daily * days
+        totalTrip: daily * days
       },
       {
         type: 'group_considerations',
@@ -498,16 +498,16 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
         hotels: hotels.slice(0, 5),
         restaurants: [
           ...scheduledRestaurants.slice(0, 3),
-          ...restaurants.filter(r => 
-            !scheduledRestaurants.some(sr => 
+          ...restaurants.filter(r =>
+            !scheduledRestaurants.some(sr =>
               sr.name.toLowerCase().includes(r.name.toLowerCase().split(' ')[0])
             )
           ).slice(0, 3)
         ],
         activities: [
           ...scheduledActivities.slice(0, 4),
-          ...activities.filter(a => 
-            !scheduledActivities.some(sa => 
+          ...activities.filter(a =>
+            !scheduledActivities.some(sa =>
               sa.name.toLowerCase().includes(a.name.toLowerCase().split(' ')[0])
             )
           ).slice(0, 4)
@@ -535,7 +535,7 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
 
   private getFallbackBookingInfo(city: string, startDate: string, endDate: string) {
     const citySlug = city.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    
+
     return {
       hotels: [
         {
@@ -602,11 +602,11 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     budget: string,
     insights: any[]
   ): Promise<TravelLogistics> {
-    const days         = this.calculateDays(startDate, endDate);
+    const days = this.calculateDays(startDate, endDate);
     console.log(`🎯 Mock itinerary generating ${days} days for ${city}`);
-    const bMult        = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1;
-    const dailyBudget  = Math.round(250 * bMult);
-    const schedule     = this.generateCitySpecificItinerary(
+    const bMult = budget === 'budget' ? 0.7 : budget === 'luxury' ? 1.5 : 1;
+    const dailyBudget = Math.round(250 * bMult);
+    const schedule = this.generateCitySpecificItinerary(
       city,
       startDate,
       days,
@@ -618,19 +618,19 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     return {
       schedule,
       totalBudget: {
-        amount   : `$${dailyBudget * days}`,
-        currency : 'USD',
+        amount: `$${dailyBudget * days}`,
+        currency: 'USD',
         breakdown: {
           accommodation: `$${Math.round(dailyBudget * 0.35 * days)} (35%)`,
-          food        : `$${Math.round(dailyBudget * 0.30 * days)} (30%)`,
-          activities  : `$${Math.round(dailyBudget * 0.25 * days)} (25%)`,
-          transport   : `$${Math.round(dailyBudget * 0.10 * days)} (10%)`,
-          misc        : `$${Math.round(dailyBudget * 0.05 * days)} (5%)`
+          food: `$${Math.round(dailyBudget * 0.30 * days)} (30%)`,
+          activities: `$${Math.round(dailyBudget * 0.25 * days)} (25%)`,
+          transport: `$${Math.round(dailyBudget * 0.10 * days)} (10%)`,
+          misc: `$${Math.round(dailyBudget * 0.05 * days)} (5%)`
         }
       },
-      bookingInfo : await this.generateBookingInfo(city, startDate, endDate, schedule),
+      bookingInfo: await this.generateBookingInfo(city, startDate, endDate, schedule),
       calculations: this.generateCalculations(days, budget, travelers),
-      logistics   : {
+      logistics: {
         transportation: `Purchase ${city} local transportation pass; Download ${city} transit app; Keep emergency taxi numbers handy`,
         packingTips: [
           'Comfortable walking shoes',
@@ -652,20 +652,20 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
   }
 
   private generateCitySpecificItinerary(
-    city        : string,
-    startDate   : string,
-    days        : number,
-    dailyBudget : number,
-    insights    : any[]
+    city: string,
+    startDate: string,
+    days: number,
+    dailyBudget: number,
+    insights: any[]
   ): DaySchedule[] {
     const c = city.toLowerCase();
     if (c.includes('barcelona')) return this.generateBarcelonaItinerary(startDate, days, dailyBudget);
-    if (c.includes('tokyo'))     return this.generateTokyoItinerary(startDate, days, dailyBudget);
-    if (c.includes('bangkok'))   return this.generateBangkokItinerary(startDate, days, dailyBudget);
-    if (c.includes('prague'))    return this.generatePragueItinerary(startDate, days, dailyBudget);
+    if (c.includes('tokyo')) return this.generateTokyoItinerary(startDate, days, dailyBudget);
+    if (c.includes('bangkok')) return this.generateBangkokItinerary(startDate, days, dailyBudget);
+    if (c.includes('prague')) return this.generatePragueItinerary(startDate, days, dailyBudget);
     if (c.includes('singapore')) return this.generateSingaporeItinerary(startDate, days, dailyBudget);
     if (c.includes('amsterdam')) return this.generateAmsterdamItinerary(startDate, days, dailyBudget);
-    if (c.includes('seoul'))     return this.generateSeoulItinerary(startDate, days, dailyBudget);
+    if (c.includes('seoul')) return this.generateSeoulItinerary(startDate, days, dailyBudget);
     return this.generateGenericDiverseItinerary(city, startDate, days, dailyBudget, insights);
   }
 
@@ -673,11 +673,11 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
 
   private generateBarcelonaItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
     const themes = [
-      { title: "Gaudí's Architectural Wonders",                theme: 'Architecture & Art', neighborhoods: ['Eixample', 'Gràcia'] },
-      { title: 'Gothic Quarter & Historic Barcelona',           theme: 'History & Culture',  neighborhoods: ['Barrio Gótico', 'El Born'] },
-      { title: 'Beach, Markets & Local Life',                   theme: 'Local Life & Relaxation', neighborhoods: ['Barceloneta', 'El Raval'] },
-      { title: 'Montjuïc & Panoramic Views',                    theme: 'Nature & Views',     neighborhoods: ['Montjuïc', 'Poble Sec'] },
-      { title: 'Food Tour & Tapas Culture',                     theme: 'Culinary Adventure', neighborhoods: ['Gràcia', 'Sant Antoni'] }
+      { title: "Gaudí's Architectural Wonders", theme: 'Architecture & Art', neighborhoods: ['Eixample', 'Gràcia'] },
+      { title: 'Gothic Quarter & Historic Barcelona', theme: 'History & Culture', neighborhoods: ['Barrio Gótico', 'El Born'] },
+      { title: 'Beach, Markets & Local Life', theme: 'Local Life & Relaxation', neighborhoods: ['Barceloneta', 'El Raval'] },
+      { title: 'Montjuïc & Panoramic Views', theme: 'Nature & Views', neighborhoods: ['Montjuïc', 'Poble Sec'] },
+      { title: 'Food Tour & Tapas Culture', theme: 'Culinary Adventure', neighborhoods: ['Gràcia', 'Sant Antoni'] }
     ];
     // const activities: any[] = [ /* … original three‑day arrays … */ ];
     const activities = [
@@ -854,15 +854,15 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     return Array.from({ length: days }, (_, i) => {
       const idx = i % themes.length;
       return {
-        day : i + 1,
+        day: i + 1,
         date: this.addDays(startDate, i),
-        title       : themes[idx].title,
-        theme       : themes[idx].theme,
-        activities  : activities[idx] || activities[0],
-        dailyBudget : `$${dailyBudget}`,
+        title: themes[idx].title,
+        theme: themes[idx].theme,
+        activities: activities[idx] || activities[0],
+        dailyBudget: `$${dailyBudget}`,
         neighborhoods: themes[idx].neighborhoods,
-        highlights  : (activities[idx] || activities[0]).map((a: any) => a.specificPlace),
-        notes       : [
+        highlights: (activities[idx] || activities[0]).map((a: any) => a.specificPlace),
+        notes: [
           'Comfortable walking shoes essential',
           'Many attractions offer student/senior discounts',
           'Siesta time: 2‑5 PM many shops close',
@@ -875,10 +875,10 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
   private generateTokyoItinerary(startDate: string, days: number, dailyBudget: number): DaySchedule[] {
     const themes = [
       { title: 'Traditional Tokyo: Temples & Gardens', theme: 'Culture & Tradition', neighborhoods: ['Asakusa', 'Ueno'] },
-      { title: 'Modern Tokyo: Shibuya & Harajuku',     theme: 'Modern Culture & Fashion', neighborhoods: ['Shibuya', 'Harajuku'] },
-      { title: 'Tsukiji Market & Ginza Luxury',        theme: 'Food & Shopping', neighborhoods: ['Tsukiji', 'Ginza'] },
-      { title: 'Otaku Culture: Akihabara & Anime',     theme: 'Pop Culture', neighborhoods: ['Akihabara', 'Ikebukuro'] },
-      { title: 'Day Trip to Mount Fuji',               theme: 'Nature & Adventure', neighborhoods: ['Kawaguchi‑ko', 'Hakone'] }
+      { title: 'Modern Tokyo: Shibuya & Harajuku', theme: 'Modern Culture & Fashion', neighborhoods: ['Shibuya', 'Harajuku'] },
+      { title: 'Tsukiji Market & Ginza Luxury', theme: 'Food & Shopping', neighborhoods: ['Tsukiji', 'Ginza'] },
+      { title: 'Otaku Culture: Akihabara & Anime', theme: 'Pop Culture', neighborhoods: ['Akihabara', 'Ikebukuro'] },
+      { title: 'Day Trip to Mount Fuji', theme: 'Nature & Adventure', neighborhoods: ['Kawaguchi‑ko', 'Hakone'] }
     ];
     const activities = [
       // Day 1: Traditional Tokyo
@@ -1006,15 +1006,15 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     return Array.from({ length: days }, (_, i) => {
       const idx = i % themes.length;
       return {
-        day : i + 1,
+        day: i + 1,
         date: this.addDays(startDate, i),
-        title       : themes[idx].title,
-        theme       : themes[idx].theme,
-        activities  : activities[idx] || activities[0],
-        dailyBudget : `$${dailyBudget}`,
+        title: themes[idx].title,
+        theme: themes[idx].theme,
+        activities: activities[idx] || activities[0],
+        dailyBudget: `$${dailyBudget}`,
         neighborhoods: themes[idx].neighborhoods,
-        highlights  : (activities[idx] || activities[0]).map((a: any) => a.specificPlace),
-        notes       : [
+        highlights: (activities[idx] || activities[0]).map((a: any) => a.specificPlace),
+        notes: [
           'JR Pass recommended',
           'Bow when greeting',
           'Remove shoes in homes/shrines',
@@ -1037,17 +1037,17 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
     insights: any[]
   ): DaySchedule[] {
     const base = [
-      { title: `Historic ${city} Discovery`,         theme: 'History & Culture'    },
-      { title: `${city} Food & Market Adventure`,   theme: 'Culinary Experience'  },
-      { title: `Art & Museums in ${city}`,          theme: 'Art & Culture'        },
-      { title: `Local Life in ${city}`,             theme: 'Local Experience'     },
-      { title: `Nature & Scenic ${city}`,           theme: 'Nature & Relaxation'  }
+      { title: `Historic ${city} Discovery`, theme: 'History & Culture' },
+      { title: `${city} Food & Market Adventure`, theme: 'Culinary Experience' },
+      { title: `Art & Museums in ${city}`, theme: 'Art & Culture' },
+      { title: `Local Life in ${city}`, theme: 'Local Experience' },
+      { title: `Nature & Scenic ${city}`, theme: 'Nature & Relaxation' }
     ];
 
     return Array.from({ length: days }, (_, i) => {
       const tpl = base[i % base.length];
       return {
-        day : i + 1,
+        day: i + 1,
         date: this.addDays(startDate, i),
         title: tpl.title,
         theme: tpl.theme,
@@ -1109,8 +1109,8 @@ FINAL REMINDER: The schedule array MUST have exactly ${days} day entries, number
 
   /* Bangkok / Prague / Singapore / Amsterdam just map to the generic builder */
 
-  private generateBangkokItinerary(start: string, d: number, b: number)   { return this.generateGenericDiverseItinerary('Bangkok',   start, d, b, []); }
-  private generatePragueItinerary(start: string, d: number, b: number)    { return this.generateGenericDiverseItinerary('Prague',    start, d, b, []); }
+  private generateBangkokItinerary(start: string, d: number, b: number) { return this.generateGenericDiverseItinerary('Bangkok', start, d, b, []); }
+  private generatePragueItinerary(start: string, d: number, b: number) { return this.generateGenericDiverseItinerary('Prague', start, d, b, []); }
   private generateSingaporeItinerary(start: string, d: number, b: number) { return this.generateGenericDiverseItinerary('Singapore', start, d, b, []); }
   private generateAmsterdamItinerary(start: string, d: number, b: number) { return this.generateGenericDiverseItinerary('Amsterdam', start, d, b, []); }
   private generateSeoulItinerary(start: string, d: number, b: number): DaySchedule[] {
